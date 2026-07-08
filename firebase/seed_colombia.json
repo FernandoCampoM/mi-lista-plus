@@ -1,0 +1,36 @@
+{
+  "catalog_metadata/COL": {
+    "version": "2026-07-08-001",
+    "updatedAt": "2026-07-08T00:00:00.000Z"
+  },
+  "countries/COL/products/ego-plant-200": {
+    "active": true,
+    "countryCode": "COL",
+    "name": "EGO PLANT BOTELLA 200 ML E",
+    "code": "1260600",
+    "category": "nutrition",
+    "suggestedPrice": 13350,
+    "points": 5,
+    "imageUrl": "",
+    "updatedAt": "2026-07-08T00:00:00.000Z",
+    "discountPrices": {
+      "25": 10356.34,
+      "30": 9735.39,
+      "35": 9134.44,
+      "40": 8533.49
+    }
+  },
+  "countries/COL/products/kit-bimarca-2024": {
+    "active": true,
+    "countryCode": "COL",
+    "name": "KIT2BIMARCA2024",
+    "code": "KIT2BIMARCA2024",
+    "category": "kit",
+    "suggestedPrice": 144500,
+    "points": 0,
+    "imageUrl": "",
+    "updatedAt": "2026-07-08T00:00:00.000Z",
+    "discountPrices": {},
+    "description": "Kit de precio fijo sin puntos ni descuento."
+  }
+}

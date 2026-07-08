@@ -1,0 +1,29 @@
+name: mi_lista_plus
+description: App Flutter online-first para consultar precios, puntos y generar simulaciones de Mi Lista +.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cloud_firestore: ^5.6.0
+  connectivity_plus: ^6.1.0
+  firebase_core: ^3.10.0
+  google_fonts: ^6.2.1
+  hive_flutter: ^1.1.0
+  intl: ^0.20.1
+  shared_preferences: ^2.3.5
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo.png
