@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../../domain/entities/product.dart';
@@ -32,5 +34,27 @@ class ProductImageCacheService {
         // No bloquea la sincronizacion si una imagen falla.
       }
     }
+  }
+
+  static Future<File?> getCachedOrDownloadImageFile(String imageUrl) async {
+    final trimmedUrl = imageUrl.trim();
+    if (trimmedUrl.isEmpty) return null;
+
+    final uri = Uri.tryParse(trimmedUrl);
+    if (uri == null || !uri.hasScheme || !uri.hasAuthority) return null;
+
+    try {
+      final cachedFile = await cacheManager.getFileFromCache(trimmedUrl);
+      if (cachedFile != null && await cachedFile.file.exists()) {
+        return cachedFile.file;
+      }
+
+      final downloadedFile = await cacheManager.getSingleFile(trimmedUrl, key: trimmedUrl);
+      if (await downloadedFile.exists()) return downloadedFile;
+    } catch (_) {
+      return null;
+    }
+
+    return null;
   }
 }

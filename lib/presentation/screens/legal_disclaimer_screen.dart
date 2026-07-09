@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/app_colors.dart';
-import '../widgets/primary_button.dart';
 
 class LegalDisclaimerScreen extends StatelessWidget {
   const LegalDisclaimerScreen({super.key});
@@ -57,9 +56,22 @@ class LegalDisclaimerScreen extends StatelessWidget {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
-              child: PrimaryButton(
-                label: 'CONTACTAR POR WHATSAPP',
+              child: ElevatedButton.icon(
                 onPressed: _openWhatsApp,
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('CONTACTAR POR WHATSAPP'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(54),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
             ),
           ),

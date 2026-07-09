@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart' hide Simulation;
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/services/currency_formatter.dart';
@@ -187,11 +188,7 @@ class SimulationDetailScreen extends StatelessWidget {
                   title: const Text('Compartir como imagen'),
                   onTap: () async {
                     Navigator.pop(sheetContext);
-                    await ShareSimulationService.shareAsImage(
-                      context: context,
-                      simulation: simulation,
-                      country: country,
-                    );
+                    await _shareImageWithLoader(context, country);
                   },
                 ),
                 ListTile(
@@ -213,6 +210,39 @@ class SimulationDetailScreen extends StatelessWidget {
     );
   }
 
+
+  Future<void> _shareImageWithLoader(BuildContext context, dynamic country) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _GeneratingImageDialog(),
+    );
+
+    try {
+      final imageFile = await ShareSimulationService.buildImageFile(
+        simulation: simulation,
+        country: country,
+      );
+
+      if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      await Share.shareXFiles(
+        [imageFile],
+        text: 'Simulación #${simulation.id}',
+      );
+    } catch (_) {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo generar la imagen. Inténtalo de nuevo.'),
+          ),
+        );
+      }
+    }
+  }
+
   BoxDecoration _cardDecoration() {
     return BoxDecoration(
       color: Colors.white,
@@ -224,6 +254,37 @@ class SimulationDetailScreen extends StatelessWidget {
           offset: Offset(0, 5),
         ),
       ],
+    );
+  }
+}
+
+
+class _GeneratingImageDialog extends StatelessWidget {
+  const _GeneratingImageDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: const Padding(
+        padding: EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 18),
+            Text(
+              'Generando imagen...',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Esto puede tardar unos segundos.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

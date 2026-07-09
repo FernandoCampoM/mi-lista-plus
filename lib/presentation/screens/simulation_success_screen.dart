@@ -56,6 +56,12 @@ class SimulationSuccessScreen extends StatelessWidget {
                   children: [
                     _Info(label: 'Fecha de la simulacion', value: '${simulation.createdAt.day}/${simulation.createdAt.month}/${simulation.createdAt.year}'),
                     _Info(label: 'ID de simulacion', value: simulation.id),
+                    _Info(
+                      label: 'Nombre',
+                      value: simulation.customerName.trim().isEmpty
+                          ? 'Cliente'
+                          : simulation.customerName.trim(),
+                    ),
                     _Info(label: 'Pais', value: simulation.countryCode),
                     _Info(label: 'Descuento', value: simulation.discountPercent == 0 ? 'Precio sugerido' : '${simulation.discountPercent}%'),
                     _Info(label: 'Puntos', value: '${simulation.totalPoints}'),

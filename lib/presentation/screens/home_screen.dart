@@ -327,8 +327,13 @@ class _SimulationListState extends State<_SimulationList> {
                             });
                           },
                         ),
-                        title: Text('Id: ${simulation.id}'),
-                        subtitle: Text('Pais: ${simulation.countryCode}'),
+                        title: Text(
+                          simulation.customerName.trim().isEmpty
+                              ? 'Cliente'
+                              : simulation.customerName.trim(),
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        subtitle: Text('Id: ${simulation.id} · Pais: ${simulation.countryCode}'),
                         trailing: Text(
                           '${simulation.createdAt.day}/${simulation.createdAt.month}/${simulation.createdAt.year}',
                         ),

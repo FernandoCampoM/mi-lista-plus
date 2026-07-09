@@ -172,6 +172,12 @@ class AppHeader extends StatelessWidget {
                   },
                   icon: const Icon(Icons.support_agent),
                   label: const Text('No estoy afiliado, quiero asesoría'),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -199,12 +205,18 @@ class AppHeader extends StatelessWidget {
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('CERRAR'),
             ),
-            ElevatedButton(
+            ElevatedButton.icon(
               onPressed: () async {
                 Navigator.pop(dialogContext);
                 await _openAdvisoryWhatsApp();
               },
-              child: const Text('CONTACTAR POR WHATSAPP'),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('CONTACTAR POR WHATSAPP'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF25D366),
+                foregroundColor: Colors.white,
+                textStyle: const TextStyle(fontWeight: FontWeight.w900),
+              ),
             ),
           ],
         );
