@@ -4,7 +4,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/entities/cart_item.dart';
-import '../../domain/entities/country.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/simulation.dart';
 
@@ -178,26 +177,3 @@ class LocalStore {
   }
 }
 
-const supportedCountries = [
-  Country(
-    code: 'COL',
-    name: 'Colombia',
-    currencyCode: 'COP',
-    flagEmoji: '🇨🇴',
-    locale: 'es_CO',
-  ),
-  Country(
-    code: 'MEX',
-    name: 'Mexico',
-    currencyCode: 'MXN',
-    flagEmoji: '🇲🇽',
-    locale: 'es_MX',
-  ),
-  Country(
-    code: 'PER',
-    name: 'Peru',
-    currencyCode: 'PEN',
-    flagEmoji: '🇵🇪',
-    locale: 'es_PE',
-  ),
-];

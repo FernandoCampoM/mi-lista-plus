@@ -47,7 +47,36 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
-  Future<void> syncProductsIfNeeded(String countryCode) async {
+  Future<List<Product>> loadProductsWithFallback(String countryCode) async {
+    var products = await loadProducts(countryCode);
+    if (products.isNotEmpty || countryCode == defaultCountryCode) {
+      return products;
+    }
+
+    await syncProductsIfNeeded(defaultCountryCode, force: true);
+    products = await loadProducts(defaultCountryCode);
+    return products;
+  }
+
+  @override
+  Future<bool> hasProducts(String countryCode) async {
+    if (_localStore.loadProducts(countryCode).isNotEmpty) return true;
+    if (!await _connectivityService.hasInternet) return false;
+
+    final metadata = await _remoteDataSource.fetchCatalogMetadata(countryCode);
+    if (metadata == null || metadata.productsCount <= 0) return false;
+
+    final products = await _remoteDataSource.fetchProducts(countryCode);
+    if (products.isEmpty) return false;
+
+    await _localStore.saveProducts(countryCode, products);
+    await _localStore.saveCatalogVersion(countryCode, metadata.version);
+    await _localStore.saveLastSync(countryCode, DateTime.now());
+    return true;
+  }
+
+  @override
+  Future<void> syncProductsIfNeeded(String countryCode, {bool force = false}) async {
     if (!await _connectivityService.hasInternet) return;
 
     final lastSync = _localStore.getLastSync(countryCode);
@@ -57,20 +86,22 @@ class ProductRepositoryImpl implements ProductRepository {
         lastSync.month == now.month &&
         lastSync.day == now.day;
 
-    if (alreadyCheckedToday) return;
+    if (!force && alreadyCheckedToday) return;
 
     try {
       final metadata = await _remoteDataSource.fetchCatalogMetadata(countryCode);
-      if (metadata == null) {
+      if (metadata == null || metadata.productsCount <= 0) {
         await _localStore.saveLastSync(countryCode, now);
         return;
       }
 
       final localVersion = _localStore.getCatalogVersion(countryCode);
-      if (localVersion != metadata.version) {
+      if (force || localVersion != metadata.version) {
         final products = await _remoteDataSource.fetchProducts(countryCode);
-        await _localStore.saveProducts(countryCode, products);
-        await _localStore.saveCatalogVersion(countryCode, metadata.version);
+        if (products.isNotEmpty) {
+          await _localStore.saveProducts(countryCode, products);
+          await _localStore.saveCatalogVersion(countryCode, metadata.version);
+        }
       }
 
       await _localStore.saveLastSync(countryCode, now);

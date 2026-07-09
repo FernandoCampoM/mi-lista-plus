@@ -3,10 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../domain/entities/product.dart';
 
 class CatalogMetadata {
-  const CatalogMetadata({required this.version, required this.updatedAt});
+  const CatalogMetadata({
+    required this.version,
+    required this.updatedAt,
+    required this.productsCount,
+  });
 
   final String version;
   final DateTime updatedAt;
+  final int productsCount;
 }
 
 class FirestoreProductRemoteDataSource {
@@ -24,6 +29,7 @@ class FirestoreProductRemoteDataSource {
         .get();
 
     if (!snapshot.exists) return null;
+
     final data = snapshot.data()!;
     final timestamp = data['updatedAt'];
 
@@ -32,6 +38,7 @@ class FirestoreProductRemoteDataSource {
       updatedAt: timestamp is Timestamp
           ? timestamp.toDate()
           : DateTime.tryParse(timestamp.toString()) ?? DateTime.now(),
+      productsCount: (data['productsCount'] as num? ?? 0).toInt(),
     );
   }
 
@@ -47,7 +54,9 @@ class FirestoreProductRemoteDataSource {
         .orderBy('name')
         .get();
 
-    return snapshot.docs.map((doc) => _fromFirestore(doc.id, doc.data())).toList();
+    return snapshot.docs
+        .map((doc) => _fromFirestore(doc.id, doc.data()))
+        .toList();
   }
 
   Product _fromFirestore(String id, Map<String, dynamic> data) {
@@ -55,21 +64,24 @@ class FirestoreProductRemoteDataSource {
 
     return Product(
       id: id,
-      countryCode: data['countryCode'] as String,
-      name: data['name'] as String,
+      countryCode: data['countryCode'] as String? ?? 'COL',
+      name: data['name'] as String? ?? '',
       code: data['code'] as String? ?? id,
       category: ProductCategory.values.firstWhere(
         (item) => item.name == data['category'],
         orElse: () => ProductCategory.nutrition,
       ),
-      suggestedPrice: (data['suggestedPrice'] as num).toDouble(),
+      suggestedPrice: (data['suggestedPrice'] as num? ?? 0).toDouble(),
       points: (data['points'] as num? ?? 0).toInt(),
       imageUrl: data['imageUrl'] as String? ?? '',
       updatedAt: timestamp is Timestamp
           ? timestamp.toDate()
           : DateTime.tryParse(timestamp.toString()) ?? DateTime.now(),
       discountPrices: (data['discountPrices'] as Map<String, dynamic>? ?? {})
-          .map((key, value) => MapEntry(int.parse(key), (value as num).toDouble())),
+          .map((key, value) => MapEntry(
+                int.parse(key),
+                (value as num).toDouble(),
+              )),
       description: data['description'] as String?,
     );
   }
