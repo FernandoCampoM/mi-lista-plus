@@ -53,6 +53,11 @@ class LocalStore {
     await _box.put('products_$countryCode', jsonEncode(encoded));
   }
 
+  Future<void> clearProducts(String countryCode) async {
+    await _box.delete('products_$countryCode');
+    await _preferences.remove('$_catalogVersionPrefix$countryCode');
+  }
+
   List<Product> loadProducts(String countryCode) {
     final raw = _box.get('products_$countryCode');
     if (raw == null) return const [];

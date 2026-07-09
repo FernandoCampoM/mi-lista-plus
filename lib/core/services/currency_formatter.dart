@@ -8,10 +8,18 @@ class CurrencyFormatter {
   final Country country;
 
   String money(num value) {
-    return NumberFormat.simpleCurrency(
+    final decimalDigits = value % 1 == 0 ? 0 : 2;
+    final amount = NumberFormat.decimalPatternDigits(
+      locale: country.locale,
+      decimalDigits: decimalDigits,
+    ).format(value);
+
+    final symbol = NumberFormat.simpleCurrency(
       locale: country.locale,
       name: country.currencyCode,
-      decimalDigits: value % 1 == 0 ? 0 : 2,
-    ).format(value);
+      decimalDigits: decimalDigits,
+    ).currencySymbol;
+
+    return '$symbol $amount';
   }
 }

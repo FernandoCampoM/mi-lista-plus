@@ -50,11 +50,11 @@ class FirestoreProductRemoteDataSource {
         .collection('countries')
         .doc(countryCode)
         .collection('products')
-        .where('active', isEqualTo: true)
         .orderBy('name')
         .get();
 
     return snapshot.docs
+        .where((doc) => doc.data()['active'] != false)
         .map((doc) => _fromFirestore(doc.id, doc.data()))
         .toList();
   }

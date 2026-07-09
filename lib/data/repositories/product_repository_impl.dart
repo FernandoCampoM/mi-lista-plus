@@ -1,12 +1,14 @@
+import 'dart:async';
+
 import '../../core/errors/app_exception.dart';
 import '../../core/services/connectivity_service.dart';
+import '../../core/services/product_image_cache_service.dart';
 import '../../domain/entities/country.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/simulation.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../datasources/firestore_product_remote_data_source.dart';
 import '../datasources/local_store.dart';
-import '../datasources/seed_products.dart';
 
 class ProductRepositoryImpl implements ProductRepository {
   ProductRepositoryImpl({
@@ -34,19 +36,9 @@ class ProductRepositoryImpl implements ProductRepository {
 
   @override
   Future<List<Product>> loadProducts(String countryCode) async {
-    final cached = _localStore.loadProducts(countryCode);
-    if (cached.isNotEmpty) return cached;
-
-    final seeded = seedProducts
-        .where((product) => product.countryCode == countryCode)
-        .toList();
-    if (seeded.isNotEmpty) {
-      await _localStore.saveProducts(countryCode, seeded);
-    }
-    return seeded;
+    return _localStore.loadProducts(countryCode);
   }
 
-  @override
   Future<List<Product>> loadProductsWithFallback(String countryCode) async {
     var products = await loadProducts(countryCode);
     if (products.isNotEmpty || countryCode == defaultCountryCode) {
@@ -58,7 +50,6 @@ class ProductRepositoryImpl implements ProductRepository {
     return products;
   }
 
-  @override
   Future<bool> hasProducts(String countryCode) async {
     if (_localStore.loadProducts(countryCode).isNotEmpty) return true;
     if (!await _connectivityService.hasInternet) return false;
@@ -70,6 +61,7 @@ class ProductRepositoryImpl implements ProductRepository {
     if (products.isEmpty) return false;
 
     await _localStore.saveProducts(countryCode, products);
+    _cacheImagesInBackground(products);
     await _localStore.saveCatalogVersion(countryCode, metadata.version);
     await _localStore.saveLastSync(countryCode, DateTime.now());
     return true;
@@ -79,18 +71,16 @@ class ProductRepositoryImpl implements ProductRepository {
   Future<void> syncProductsIfNeeded(String countryCode, {bool force = false}) async {
     if (!await _connectivityService.hasInternet) return;
 
-    final lastSync = _localStore.getLastSync(countryCode);
     final now = DateTime.now();
-    final alreadyCheckedToday = lastSync != null &&
-        lastSync.year == now.year &&
-        lastSync.month == now.month &&
-        lastSync.day == now.day;
-
-    if (!force && alreadyCheckedToday) return;
 
     try {
+      // Siempre consultamos la metadata al abrir/cambiar pais.
+      // Esta lectura es liviana y permite detectar cambios de version
+      // sin esperar al dia siguiente. Los productos solo se descargan
+      // cuando la version remota cambia o cuando force=true.
       final metadata = await _remoteDataSource.fetchCatalogMetadata(countryCode);
       if (metadata == null || metadata.productsCount <= 0) {
+        await _localStore.clearProducts(countryCode);
         await _localStore.saveLastSync(countryCode, now);
         return;
       }
@@ -100,7 +90,10 @@ class ProductRepositoryImpl implements ProductRepository {
         final products = await _remoteDataSource.fetchProducts(countryCode);
         if (products.isNotEmpty) {
           await _localStore.saveProducts(countryCode, products);
+          _cacheImagesInBackground(products);
           await _localStore.saveCatalogVersion(countryCode, metadata.version);
+        } else {
+          await _localStore.clearProducts(countryCode);
         }
       }
 
@@ -111,6 +104,10 @@ class ProductRepositoryImpl implements ProductRepository {
         cause: error,
       );
     }
+  }
+
+  void _cacheImagesInBackground(List<Product> products) {
+    unawaited(ProductImageCacheService.cacheProductImagesInBackground(products));
   }
 
   @override

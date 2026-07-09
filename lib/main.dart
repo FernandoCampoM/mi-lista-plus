@@ -12,6 +12,7 @@ import 'core/services/connectivity_service.dart';
 import 'data/datasources/firestore_product_remote_data_source.dart';
 import 'data/datasources/local_store.dart';
 import 'data/repositories/product_repository_impl.dart';
+import 'firebase_options.dart';
 import 'presentation/screens/splash_screen.dart';
 import 'presentation/state/app_scope.dart';
 import 'presentation/state/app_state.dart';
@@ -23,7 +24,9 @@ Future<void> main() async {
 
   FirebaseFirestore? firestore;
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     firestore = FirebaseFirestore.instance;
     firestore.settings = const Settings(persistenceEnabled: true);
   } catch (_) {

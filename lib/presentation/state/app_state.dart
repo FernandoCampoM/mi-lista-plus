@@ -49,26 +49,23 @@ class AppState extends ChangeNotifier {
     countries = await _repository.getCountries();
     final countryCode = await _repository.getSelectedCountry();
     if (countryCode != null) {
-      selectedCountry = countries.firstWhere(
+      final storedCountry = countries.firstWhere(
         (country) => country.code == countryCode,
         orElse: () => countries.first,
       );
-      await loadCountry(selectedCountry!, persist: false);
+      await loadCountry(storedCountry, persist: false);
     }
 
     isLoading = false;
     notifyListeners();
   }
 
-  Future<void> loadCountry(Country country, {bool persist = true}) async {
-    selectedCountry = country;
+  Future<bool> loadCountry(Country country, {bool persist = true}) async {
+    final previousCountry = selectedCountry;
+
     isLoading = true;
     errorMessage = null;
     notifyListeners();
-
-    if (persist) {
-      await _repository.saveSelectedCountry(country.code);
-    }
 
     try {
       await _repository.syncProductsIfNeeded(country.code);
@@ -76,12 +73,33 @@ class AppState extends ChangeNotifier {
       errorMessage = error.toString();
     }
 
-    products = await _repository.loadProducts(country.code);
+    final loadedProducts = await _repository.loadProducts(country.code);
+
+    if (loadedProducts.isEmpty) {
+      selectedCountry = previousCountry;
+      products = const [];
+      simulations = const [];
+      _cart.clear();
+      selectedDiscount = 0;
+      errorMessage = '${country.name} no tiene productos disponibles aun.';
+      isLoading = false;
+      notifyListeners();
+      return false;
+    }
+
+    selectedCountry = country;
+    products = loadedProducts;
     simulations = await _repository.loadSimulations(country.code);
     _cart.clear();
     selectedDiscount = 0;
+
+    if (persist) {
+      await _repository.saveSelectedCountry(country.code);
+    }
+
     isLoading = false;
     notifyListeners();
+    return true;
   }
 
   void setTab(HomeTab value) {

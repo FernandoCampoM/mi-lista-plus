@@ -9,6 +9,15 @@ import '../widgets/cart_badge_button.dart';
 import '../widgets/product_avatar.dart';
 import 'product_detail_screen.dart';
 
+enum ProductSortOption {
+  az,
+  za,
+  lowerPrice,
+  higherPrice,
+  morePoints,
+  lessPoints,
+}
+
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({required this.categoryName, super.key});
 
@@ -20,6 +29,7 @@ class ProductListScreen extends StatefulWidget {
 
 class _ProductListScreenState extends State<ProductListScreen> {
   String query = '';
+  ProductSortOption? sortOption;
   late ProductCategory selectedCategory;
 
   @override
@@ -41,6 +51,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
           product.code.contains(query);
       return matchesCategory && matchesQuery;
     }).toList();
+    _sortProducts(products);
+
     final categories = state.products
         .map((product) => product.category)
         .toSet()
@@ -48,7 +60,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
       ..sort((a, b) => _categoryLabel(a).compareTo(_categoryLabel(b)));
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: const Color(0xFFF0EEF4),
       body: Column(
         children: [
           AppHeader(
@@ -57,7 +69,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             actions: const [CartBadgeButton()],
           ),
           Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
             child: Column(
               children: [
                 DropdownButtonFormField<ProductCategory>(
@@ -84,36 +96,111 @@ class _ProductListScreenState extends State<ProductListScreen> {
                     hintText: 'Buscar...',
                   ),
                 ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    InkWell(
+                      onTap: _openSortSheet,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              sortOption == null
+                                  ? 'Ordenar por'
+                                  : 'Ordenar por: ${_sortLabel(sortOption!)}',
+                              style: const TextStyle(color: AppColors.muted),
+                            ),
+                            const SizedBox(width: 3),
+                            const Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 20,
+                              color: AppColors.muted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: sortOption == null
+                          ? null
+                          : () => setState(() => sortOption = null),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.muted,
+                      ),
+                      child: const Text('Limpiar'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
           Expanded(
-            child: ListView.separated(
+            child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
               itemCount: products.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final product = products[index];
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  leading: ProductAvatar(product: product),
-                  title: Text(
-                    product.name,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    'Codigo  ${product.code}\n'
-                    'Puntos  ${product.points == 0 ? 'N/A' : product.points}\n'
-                    'Precio sugerido',
-                  ),
-                  trailing: Text(
-                    formatter.money(product.suggestedPrice),
-                    style: const TextStyle(color: AppColors.muted),
-                  ),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => ProductDetailScreen(product: product),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Material(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    elevation: 0,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProductDetailScreen(product: product),
+                        ),
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.black.withOpacity(.08),
+                            width: .8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(.025),
+                              blurRadius: 7,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 5,
+                          ),
+                          leading: ProductAvatar(product: product, size: 58),
+                          title: Text(
+                            product.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text(
+                            'Codigo  ${product.code}\n'
+                            'Puntos  ${product.points == 0 ? 'N/A' : product.points}\n'
+                            'Precio sugerido',
+                          ),
+                          trailing: Text(
+                            formatter.money(product.suggestedPrice),
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 17,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 );
@@ -125,11 +212,123 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
+  void _sortProducts(List<Product> products) {
+    switch (sortOption) {
+      case ProductSortOption.az:
+        products.sort((a, b) => a.name.compareTo(b.name));
+      case ProductSortOption.za:
+        products.sort((a, b) => b.name.compareTo(a.name));
+      case ProductSortOption.lowerPrice:
+        products.sort((a, b) => a.suggestedPrice.compareTo(b.suggestedPrice));
+      case ProductSortOption.higherPrice:
+        products.sort((a, b) => b.suggestedPrice.compareTo(a.suggestedPrice));
+      case ProductSortOption.morePoints:
+        products.sort((a, b) => b.points.compareTo(a.points));
+      case ProductSortOption.lessPoints:
+        products.sort((a, b) => a.points.compareTo(b.points));
+      case null:
+        break;
+    }
+  }
+
+  Future<void> _openSortSheet() async {
+    var selected = sortOption;
+
+    final result = await showModalBottomSheet<ProductSortOption?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * .82,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Ordenar por',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Flexible(
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: ProductSortOption.values
+                              .map(
+                                (option) => RadioListTile<ProductSortOption>(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  value: option,
+                                  groupValue: selected,
+                                  title: Text(_sortLabel(option)),
+                                  onChanged: (value) =>
+                                      setSheetState(() => selected = value),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(context, null),
+                              child: const Text('LIMPIAR'),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, selected),
+                              child: const Text('CONFIRMAR'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted) return;
+    setState(() => sortOption = result);
+  }
+
   String _categoryLabel(ProductCategory category) {
     return switch (category) {
       ProductCategory.nutrition => 'Nutricion',
       ProductCategory.beauty => 'Belleza',
       ProductCategory.kit => 'Kits',
+    };
+  }
+
+  String _sortLabel(ProductSortOption option) {
+    return switch (option) {
+      ProductSortOption.az => 'A-Z',
+      ProductSortOption.za => 'Z-a',
+      ProductSortOption.lowerPrice => 'Menor Precio',
+      ProductSortOption.higherPrice => 'Mayor Precio',
+      ProductSortOption.morePoints => 'Más Puntos',
+      ProductSortOption.lessPoints => 'Menos Puntos',
     };
   }
 }

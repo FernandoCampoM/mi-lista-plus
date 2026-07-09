@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide Simulation;
 
 import '../../core/constants/app_colors.dart';
 import '../../core/services/currency_formatter.dart';
+import '../../core/services/share_simulation_service.dart';
 import '../../domain/entities/simulation.dart';
 import '../state/app_scope.dart';
 import '../widgets/app_header.dart';
@@ -156,11 +157,59 @@ class SimulationDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.all(18),
             child: SafeArea(
               top: false,
-              child: PrimaryButton(label: 'COMPARTIR', onPressed: () {}),
+              child: PrimaryButton(label: 'COMPARTIR', onPressed: () => _openShareSheet(context)),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _openShareSheet(BuildContext context) async {
+    final state = AppScope.of(context);
+    final country = state.selectedCountry!;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.image, color: AppColors.purple),
+                  title: const Text('Compartir como imagen'),
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await ShareSimulationService.shareAsImage(
+                      context: context,
+                      simulation: simulation,
+                      country: country,
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.article, color: AppColors.purple),
+                  title: const Text('Compartir como texto'),
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await ShareSimulationService.shareAsText(
+                      simulation: simulation,
+                      country: country,
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

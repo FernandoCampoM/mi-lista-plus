@@ -17,13 +17,14 @@ class Country {
 const defaultCountryCode = 'COL';
 
 const supportedCountries = [
+  Country(code: 'COL', name: 'Colombia', currencyCode: 'COP', flagEmoji: '🇨🇴', locale: 'es_CO'),
   Country(code: 'DEU', name: 'Alemania', currencyCode: 'EUR', flagEmoji: '🇩🇪', locale: 'de_DE'),
   Country(code: 'ARG', name: 'Argentina', currencyCode: 'ARS', flagEmoji: '🇦🇷', locale: 'es_AR'),
   Country(code: 'BOL', name: 'Bolivia', currencyCode: 'BOB', flagEmoji: '🇧🇴', locale: 'es_BO'),
   Country(code: 'BRA', name: 'Brasil', currencyCode: 'BRL', flagEmoji: '🇧🇷', locale: 'pt_BR'),
   Country(code: 'BEL', name: 'Bélgica', currencyCode: 'EUR', flagEmoji: '🇧🇪', locale: 'fr_BE'),
   Country(code: 'CHL', name: 'Chile', currencyCode: 'CLP', flagEmoji: '🇨🇱', locale: 'es_CL'),
-  Country(code: 'COL', name: 'Colombia', currencyCode: 'COP', flagEmoji: '🇨🇴', locale: 'es_CO'),
+  
   Country(code: 'CRI', name: 'Costa Rica', currencyCode: 'CRC', flagEmoji: '🇨🇷', locale: 'es_CR'),
   Country(code: 'ECU', name: 'Ecuador', currencyCode: 'USD', flagEmoji: '🇪🇨', locale: 'es_EC'),
   Country(code: 'SLV', name: 'El Salvador', currencyCode: 'USD', flagEmoji: '🇸🇻', locale: 'es_SV'),
