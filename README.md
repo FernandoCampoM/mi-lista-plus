@@ -73,6 +73,31 @@ flutter run -d chrome
 
 Si Firebase no esta configurado, la app abre igual con datos semilla locales de Colombia para revisar UI y flujo.
 
+## Configuracion AdMob
+
+La app integra `google_mobile_ads` para banners adaptativos e intersticiales. Por defecto usa IDs oficiales de prueba de Google para evitar trafico invalido durante desarrollo.
+
+Cuando tengas los IDs reales, ejecuta con variables de entorno:
+
+```bash
+flutter run \
+  --dart-define=ADMOB_ANDROID_BANNER_ID=ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy \
+  --dart-define=ADMOB_ANDROID_INTERSTITIAL_ID=ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy \
+  --dart-define=ADMOB_IOS_BANNER_ID=ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy \
+  --dart-define=ADMOB_IOS_INTERSTITIAL_ID=ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy
+```
+
+Cuando generes las carpetas nativas con `flutter create`, agrega tambien el App ID de AdMob en:
+
+- Android: `android/app/src/main/AndroidManifest.xml`, dentro de `<application>`.
+- iOS: `ios/Runner/Info.plist`.
+
+Los intersticiales se muestran con control de frecuencia:
+
+- Cada 10 acciones importantes como maximo.
+- Acciones importantes: cambiar pais, terminar una simulacion, compartir/exportar una simulacion y volver al inicio despues de varios minutos.
+- Al abrir "Descargo de responsabilidad", solo se intenta mostrar un intersticial la primera vez del dia.
+
 ## Como probar
 
 1. Primer arranque: debe pedir pais y guardar la seleccion.
@@ -81,6 +106,7 @@ Si Firebase no esta configurado, la app abre igual con datos semilla locales de 
 4. Detalle: productos con descuento muestran tabla; kits muestran precio fijo.
 5. Carrito: agregar/restar cantidades, seleccionar descuento y generar simulacion.
 6. Simulaciones: debe aparecer la simulacion creada, permitir abrir detalle, editar y eliminar.
+7. Anuncios: en desarrollo deben cargar IDs de prueba; valida banner compacto en Home, banner al final de Simulaciones e intersticiales solo despues de las reglas anteriores.
 
 ## Mejoras futuras
 

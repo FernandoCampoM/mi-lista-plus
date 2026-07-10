@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../../domain/entities/country.dart';
 import '../state/app_scope.dart';
 import 'home_screen.dart';
@@ -49,6 +50,11 @@ class _CountryScreenState extends State<CountryScreen> {
       );
       return;
     }
+
+    await AppScope.adsOf(context).recordImportantAction(
+      ImportantAdAction.countryChanged,
+    );
+    if (!context.mounted) return;
 
     await Navigator.pushReplacement(
       context,

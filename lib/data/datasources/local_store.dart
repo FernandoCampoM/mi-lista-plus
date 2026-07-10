@@ -69,7 +69,10 @@ class LocalStore {
 
   Future<void> saveSimulation(Simulation simulation) async {
     final current = loadSimulations(simulation.countryCode);
-    final next = [simulation, ...current];
+    final next = [
+      simulation,
+      ...current.where((item) => item.id != simulation.id),
+    ];
     await saveSimulations(simulation.countryCode, next);
   }
 
@@ -181,4 +184,3 @@ class LocalStore {
     );
   }
 }
-

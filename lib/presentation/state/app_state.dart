@@ -24,6 +24,7 @@ class AppState extends ChangeNotifier {
   bool isLoading = true;
   int selectedDiscount = 0;
   HomeTab tab = HomeTab.products;
+  Simulation? editingSimulation;
 
   List<CartItem> get cartItems => _cart.values.toList();
 
@@ -80,6 +81,7 @@ class AppState extends ChangeNotifier {
       products = const [];
       simulations = const [];
       _cart.clear();
+      editingSimulation = null;
       selectedDiscount = 0;
       errorMessage = '${country.name} no tiene productos disponibles aun.';
       isLoading = false;
@@ -91,6 +93,7 @@ class AppState extends ChangeNotifier {
     products = loadedProducts;
     simulations = await _repository.loadSimulations(country.code);
     _cart.clear();
+    editingSimulation = null;
     selectedDiscount = 0;
 
     if (persist) {
@@ -143,18 +146,20 @@ class AppState extends ChangeNotifier {
       throw StateError('Agrega al menos un producto para simular.');
     }
 
+    final currentEditingSimulation = editingSimulation;
     final simulation = Simulation(
-      id: _uuid.v4().split('-').first,
+      id: currentEditingSimulation?.id ?? _uuid.v4().split('-').first,
       countryCode: selectedCountry!.code,
       customerName: customerName.trim().isEmpty ? 'Cliente' : customerName.trim(),
       discountPercent: selectedDiscount,
-      createdAt: DateTime.now(),
+      createdAt: currentEditingSimulation?.createdAt ?? DateTime.now(),
       items: cartItems,
     );
 
     await _repository.saveSimulation(simulation);
     simulations = await _repository.loadSimulations(selectedCountry!.code);
     _cart.clear();
+    editingSimulation = null;
     selectedDiscount = 0;
     tab = HomeTab.simulations;
     notifyListeners();
@@ -177,6 +182,7 @@ class AppState extends ChangeNotifier {
   }
 
   void loadSimulationIntoCart(Simulation simulation) {
+    editingSimulation = simulation;
     _cart
       ..clear()
       ..addEntries(
@@ -184,5 +190,12 @@ class AppState extends ChangeNotifier {
       );
     selectedDiscount = simulation.discountPercent;
     notifyListeners();
+  }
+
+  void clearEditingSimulation({bool notify = true}) {
+    editingSimulation = null;
+    if (notify) {
+      notifyListeners();
+    }
   }
 }

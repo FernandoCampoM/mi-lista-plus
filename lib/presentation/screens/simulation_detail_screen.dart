@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide Simulation;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../core/services/share_simulation_service.dart';
 import '../../domain/entities/simulation.dart';
@@ -200,6 +201,11 @@ class SimulationDetailScreen extends StatelessWidget {
                       simulation: simulation,
                       country: country,
                     );
+                    if (context.mounted) {
+                      await AppScope.adsOf(context).recordImportantAction(
+                        ImportantAdAction.simulationShared,
+                      );
+                    }
                   },
                 ),
               ],
@@ -231,6 +237,11 @@ class SimulationDetailScreen extends StatelessWidget {
         [imageFile],
         text: 'Simulación #${simulation.id}',
       );
+      if (context.mounted) {
+        await AppScope.adsOf(context).recordImportantAction(
+          ImportantAdAction.simulationShared,
+        );
+      }
     } catch (_) {
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();

@@ -3,13 +3,28 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
+import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/cart_badge_button.dart';
 import 'product_list_screen.dart';
 import 'simulation_detail_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      AppScope.adsOf(context).recordHomeVisible();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +37,10 @@ class HomeScreen extends StatelessWidget {
           AppHeader(
             title: 'Productos',
             actions: const [CartBadgeButton()],
+          ),
+          const AdaptiveBannerAd(
+            margin: EdgeInsets.fromLTRB(18, 14, 18, 0),
+            maxHeight: 64,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
@@ -271,8 +290,15 @@ class _SimulationListState extends State<_SimulationList> {
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
-              itemCount: state.simulations.length,
+              itemCount: state.simulations.length + 1,
               itemBuilder: (context, index) {
+                if (index == state.simulations.length) {
+                  return const AdaptiveBannerAd(
+                    margin: EdgeInsets.only(top: 8, bottom: 10),
+                    maxHeight: 72,
+                  );
+                }
+
                 final simulation = state.simulations[index];
                 final selected = selectedIds.contains(simulation.id);
 

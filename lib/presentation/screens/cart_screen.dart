@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../state/app_scope.dart';
+import '../state/app_state.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
@@ -19,9 +21,29 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   final customerNameController = TextEditingController();
+  late AppState _state;
+  bool _loadedEditingName = false;
+  bool _simulationWasSaved = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _state = AppScope.of(context);
+    if (_loadedEditingName) return;
+
+    final editingSimulation = _state.editingSimulation;
+    final customerName = editingSimulation?.customerName.trim();
+    if (customerName != null && customerName != 'Cliente') {
+      customerNameController.text = customerName;
+    }
+    _loadedEditingName = true;
+  }
 
   @override
   void dispose() {
+    if (!_simulationWasSaved) {
+      _state.clearEditingSimulation(notify: false);
+    }
     customerNameController.dispose();
     super.dispose();
   }
@@ -30,6 +52,7 @@ class _CartScreenState extends State<CartScreen> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final formatter = CurrencyFormatter(state.selectedCountry!);
+    final isEditingSimulation = state.editingSimulation != null;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -157,12 +180,18 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                   const SizedBox(height: 14),
                   PrimaryButton(
-                    label: 'GENERAR SIMULACION',
+                    label: isEditingSimulation
+                        ? 'ACTUALIZAR SIMULACION'
+                        : 'GENERAR SIMULACION',
                     onPressed: state.cartItems.isEmpty
                         ? null
                         : () async {
                             final simulation = await state.createSimulation(
                               customerName: customerNameController.text,
+                            );
+                            _simulationWasSaved = true;
+                            await AppScope.adsOf(context).recordImportantAction(
+                              ImportantAdAction.simulationGenerated,
                             );
                             if (context.mounted) {
                               await Navigator.pushReplacement(

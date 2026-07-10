@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../screens/legal_disclaimer_screen.dart';
 import '../state/app_scope.dart';
 
@@ -80,6 +81,11 @@ class AppHeader extends StatelessWidget {
                   return;
                 }
 
+                await AppScope.adsOf(context).recordImportantAction(
+                  ImportantAdAction.countryChanged,
+                );
+                if (!context.mounted) return;
+
                 Navigator.of(context).popUntil((route) => route.isFirst);
               },
               itemBuilder: (context) => state.countries
@@ -152,8 +158,12 @@ class AppHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 OutlinedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
                     Navigator.pop(sheetContext);
+                    await AppScope.adsOf(context)
+                        .showDisclaimerInterstitialOncePerDay();
+                    if (!context.mounted) return;
+
                     Navigator.push(
                       context,
                       MaterialPageRoute<void>(

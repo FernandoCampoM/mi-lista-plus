@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/constants/app_colors.dart';
+import 'core/services/app_ad_service.dart';
 import 'core/services/connectivity_service.dart';
 import 'data/datasources/firestore_product_remote_data_source.dart';
 import 'data/datasources/local_store.dart';
@@ -34,6 +35,9 @@ Future<void> main() async {
   }
 
   final preferences = await SharedPreferences.getInstance();
+  final adService = AppAdService(preferences);
+  await adService.initialize();
+
   final box = await Hive.openBox<String>(LocalStore.productsBoxName);
   final localStore = LocalStore(preferences, box);
   final repository = ProductRepositoryImpl(
@@ -42,18 +46,24 @@ Future<void> main() async {
     connectivityService: ConnectivityService(Connectivity()),
   );
 
-  runApp(MiListaPlusApp(state: AppState(repository)));
+  runApp(MiListaPlusApp(state: AppState(repository), adService: adService));
 }
 
 class MiListaPlusApp extends StatelessWidget {
-  const MiListaPlusApp({required this.state, super.key});
+  const MiListaPlusApp({
+    required this.state,
+    required this.adService,
+    super.key,
+  });
 
   final AppState state;
+  final AppAdService adService;
 
   @override
   Widget build(BuildContext context) {
     return AppScope(
       state: state,
+      adService: adService,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Mi Lista +',
