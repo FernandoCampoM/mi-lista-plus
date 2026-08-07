@@ -80,18 +80,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                         const SizedBox(height: 14),
                         Text('Mi descuento: ${state.selectedDiscount}%'),
-                        const SizedBox(height: 10),
-                        ...product.discountPrices.entries.map(
-                          (entry) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                Expanded(child: Text('Descuento ${entry.key}%')),
-                                Text(formatter.money(entry.value)),
-                              ],
-                            ),
-                          ),
-                        ),
+const SizedBox(height: 10),
+...(() {
+  final discounts = product.discountPrices.entries.toList()
+    ..sort((a, b) => a.key.compareTo(b.key));
+
+  return discounts.map(
+    (entry) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text('Descuento ${entry.key}%')),
+          Text(formatter.money(entry.value)),
+        ],
+      ),
+    ),
+  );
+})(),
                       ],
                     ),
                   )
