@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -24,18 +25,21 @@ Future<void> main() async {
   await Hive.initFlutter();
 
   FirebaseFirestore? firestore;
+  FirebaseRemoteConfig? remoteConfig;
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
     firestore = FirebaseFirestore.instance;
     firestore.settings = const Settings(persistenceEnabled: true);
+    remoteConfig = FirebaseRemoteConfig.instance;
   } catch (_) {
     firestore = null;
+    remoteConfig = null;
   }
 
   final preferences = await SharedPreferences.getInstance();
-  final adService = AppAdService(preferences);
+  final adService = AppAdService(preferences, remoteConfig: remoteConfig);
   await adService.initialize();
 
   final box = await Hive.openBox<String>(LocalStore.productsBoxName);

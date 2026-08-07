@@ -16,6 +16,7 @@ enum ProductSortOption {
   higherPrice,
   morePoints,
   lessPoints,
+  bestPointsPerCurrency,
 }
 
 class ProductListScreen extends StatefulWidget {
@@ -182,9 +183,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           leading: ProductAvatar(product: product, size: 58),
                           title: Text(
                             product.name,
-                            maxLines: 2,
+                            maxLines: 4,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.15,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                           subtitle: Text(
                             'Codigo  ${product.code}\n'
@@ -226,9 +231,28 @@ class _ProductListScreenState extends State<ProductListScreen> {
         products.sort((a, b) => b.points.compareTo(a.points));
       case ProductSortOption.lessPoints:
         products.sort((a, b) => a.points.compareTo(b.points));
+      case ProductSortOption.bestPointsPerCurrency:
+        products.sort(_comparePointsPerCurrency);
       case null:
         break;
     }
+  }
+
+  int _comparePointsPerCurrency(Product a, Product b) {
+    final aHasPoints = a.points > 0;
+    final bHasPoints = b.points > 0;
+    if (aHasPoints != bHasPoints) return aHasPoints ? -1 : 1;
+    if (!aHasPoints) return a.name.compareTo(b.name);
+
+    final aPrice = a.priceForDiscount(40);
+    final bPrice = b.priceForDiscount(40);
+    final byCostPerPoint =
+        a.costPerPointAt40!.compareTo(b.costPerPointAt40!);
+    if (byCostPerPoint != 0) return byCostPerPoint;
+
+    final byPoints = b.points.compareTo(a.points);
+    if (byPoints != 0) return byPoints;
+    return aPrice.compareTo(bPrice);
   }
 
   Future<void> _openSortSheet() async {
@@ -329,6 +353,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
       ProductSortOption.higherPrice => 'Mayor Precio',
       ProductSortOption.morePoints => 'Más Puntos',
       ProductSortOption.lessPoints => 'Menos Puntos',
+      ProductSortOption.bestPointsPerCurrency => 'Más Puntos por \$',
     };
   }
 }

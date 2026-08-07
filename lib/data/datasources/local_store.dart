@@ -4,7 +4,9 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/entities/cart_item.dart';
+import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/product.dart';
+import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 
 class LocalStore {
@@ -15,6 +17,8 @@ class LocalStore {
   static const _lastSyncPrefix = 'last_sync_';
   static const _catalogVersionPrefix = 'catalog_version_';
   static const _simulationsPrefix = 'simulations_';
+  static const _inventoryPrefix = 'inventory_';
+  static const _salesPrefix = 'sales_';
 
   final SharedPreferences _preferences;
   final Box<String> _box;
@@ -110,6 +114,59 @@ class LocalStore {
         .toList();
   }
 
+  List<InventoryItem> loadInventory(String countryCode) {
+    final raw = _box.get('$_inventoryPrefix$countryCode');
+    if (raw == null) return const [];
+    final decoded = jsonDecode(raw) as List<dynamic>;
+    return decoded
+        .map((value) => _inventoryItemFromJson(value as Map<String, dynamic>))
+        .where((item) => item.quantity > 0)
+        .toList();
+  }
+
+  Future<void> saveInventory(
+    String countryCode,
+    List<InventoryItem> inventory,
+  ) {
+    final activeItems = inventory.where((item) => item.quantity > 0);
+    return _box.put(
+      '$_inventoryPrefix$countryCode',
+      jsonEncode(activeItems.map(_inventoryItemToJson).toList()),
+    );
+  }
+
+  List<Sale> loadSales(String countryCode) {
+    final raw = _box.get('$_salesPrefix$countryCode');
+    if (raw == null) return const [];
+    final decoded = jsonDecode(raw) as List<dynamic>;
+    return decoded
+        .map((value) => _saleFromJson(value as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> registerSale(
+    String countryCode,
+    List<InventoryItem> inventory,
+    Sale sale,
+  ) {
+    final sales = [sale, ...loadSales(countryCode)];
+    return saveSalesAndInventory(countryCode, inventory, sales);
+  }
+
+  Future<void> saveSalesAndInventory(
+    String countryCode,
+    List<InventoryItem> inventory,
+    List<Sale> sales,
+  ) {
+    final activeInventory = inventory.where((item) => item.quantity > 0);
+    return _box.putAll({
+      '$_inventoryPrefix$countryCode': jsonEncode(
+        activeInventory.map(_inventoryItemToJson).toList(),
+      ),
+      '$_salesPrefix$countryCode': jsonEncode(sales.map(_saleToJson).toList()),
+    });
+  }
+
   static Map<String, dynamic> _productToJson(Product product) {
     return {
       'id': product.id,
@@ -181,6 +238,81 @@ class LocalStore {
             ),
           )
           .toList(),
+    );
+  }
+
+  static Map<String, dynamic> _inventoryItemToJson(InventoryItem item) {
+    return {
+      'product': _productToJson(item.product),
+      'quantity': item.quantity,
+    };
+  }
+
+  static InventoryItem _inventoryItemFromJson(Map<String, dynamic> json) {
+    return InventoryItem(
+      product: _productFromJson(json['product'] as Map<String, dynamic>),
+      quantity: (json['quantity'] as num).toInt(),
+    );
+  }
+
+  static Map<String, dynamic> _saleToJson(Sale sale) {
+    return {
+      'id': sale.id,
+      'number': sale.number,
+      'countryCode': sale.countryCode,
+      'customerName': sale.customerName,
+      'soldAt': sale.soldAt.toIso8601String(),
+      'status': sale.status.name,
+      'receivedAmount': sale.receivedAmount,
+      'items': sale.items.map(_saleItemToJson).toList(),
+    };
+  }
+
+  static Sale _saleFromJson(Map<String, dynamic> json) {
+    return Sale(
+      id: json['id'] as String,
+      number: (json['number'] as num?)?.toInt() ?? 0,
+      countryCode: json['countryCode'] as String,
+      customerName: json['customerName'] as String? ?? 'Cliente',
+      soldAt: DateTime.parse(json['soldAt'] as String),
+      status: SaleStatus.values.firstWhere(
+        (status) => status.name == json['status'],
+        orElse: () => SaleStatus.completed,
+      ),
+      receivedAmount: (json['receivedAmount'] as num?)?.toDouble(),
+      items: (json['items'] as List<dynamic>)
+          .map((value) => _saleItemFromJson(value as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  static Map<String, dynamic> _saleItemToJson(SaleItem item) {
+    return {
+      'productId': item.productId,
+      'productName': item.productName,
+      'productCode': item.productCode,
+      'imageUrl': item.imageUrl,
+      'quantity': item.quantity,
+      'suggestedUnitPrice': item.suggestedUnitPrice,
+      'costUnitPrice': item.costUnitPrice,
+      'pointsPerUnit': item.pointsPerUnit,
+      'discountPercent': item.discountPercent,
+      'isGift': item.isGift,
+    };
+  }
+
+  static SaleItem _saleItemFromJson(Map<String, dynamic> json) {
+    return SaleItem(
+      productId: json['productId'] as String,
+      productName: json['productName'] as String,
+      productCode: json['productCode'] as String? ?? '',
+      imageUrl: json['imageUrl'] as String? ?? '',
+      quantity: (json['quantity'] as num).toInt(),
+      suggestedUnitPrice: (json['suggestedUnitPrice'] as num).toDouble(),
+      costUnitPrice: (json['costUnitPrice'] as num).toDouble(),
+      pointsPerUnit: (json['pointsPerUnit'] as num).toInt(),
+      discountPercent: (json['discountPercent'] as num).toInt(),
+      isGift: json['isGift'] as bool? ?? false,
     );
   }
 }

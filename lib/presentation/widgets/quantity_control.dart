@@ -11,8 +11,8 @@ class QuantityControl extends StatelessWidget {
   });
 
   final int quantity;
-  final VoidCallback onAdd;
-  final VoidCallback onRemove;
+  final VoidCallback? onAdd;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +38,7 @@ class _RoundAction extends StatelessWidget {
   const _RoundAction({required this.icon, required this.onPressed});
 
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -48,8 +48,8 @@ class _RoundAction extends StatelessWidget {
       child: Container(
         width: 24,
         height: 24,
-        decoration: const BoxDecoration(
-          color: AppColors.orange,
+        decoration: BoxDecoration(
+          color: onPressed == null ? AppColors.line : AppColors.orange,
           shape: BoxShape.circle,
         ),
         child: Icon(icon, color: Colors.white, size: 16),

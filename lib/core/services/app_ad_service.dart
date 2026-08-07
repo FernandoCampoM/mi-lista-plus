@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,26 +14,57 @@ enum ImportantAdAction {
   returnedHomeAfterSeveralMinutes,
 }
 
+enum BannerPlacement { home, simulations, inventory, sales }
+
 class AppAdService {
-  AppAdService(this._preferences);
+  AppAdService(this._preferences, {FirebaseRemoteConfig? remoteConfig})
+      : _remoteConfig = remoteConfig;
 
   static const _importantActionCountKey = 'ads_important_action_count';
   static const _lastImportantActionKey = 'ads_last_important_action';
+  static const _lastInterstitialShownAtKey = 'ads_last_interstitial_shown_at';
   static const _lastDisclaimerInterstitialDateKey =
       'ads_last_disclaimer_interstitial_date';
   static const _lastHomeVisibleAtKey = 'ads_last_home_visible_at';
-  static const _importantActionsThreshold = 10;
+  static const _defaultActionFrequency = 10;
+  static const _defaultCooldownSeconds = 180;
   static const _returnHomeMinimumDelay = Duration(minutes: 3);
 
   final SharedPreferences _preferences;
+  final FirebaseRemoteConfig? _remoteConfig;
   InterstitialAd? _interstitialAd;
   bool _isInitialized = false;
   bool _isLoadingInterstitial = false;
   bool _isShowingInterstitial = false;
+  bool _remoteDefaultsReady = false;
+
+  int get actionFrequency {
+    if (!_remoteDefaultsReady) return _defaultActionFrequency;
+    final configured = _remoteConfig?.getInt(
+      'ads_interstitial_action_frequency',
+    );
+    return configured == null || configured < 1
+        ? _defaultActionFrequency
+        : configured;
+  }
+
+  Duration get interstitialCooldown {
+    if (!_remoteDefaultsReady) {
+      return const Duration(seconds: _defaultCooldownSeconds);
+    }
+    final configured = _remoteConfig?.getInt(
+      'ads_interstitial_cooldown_seconds',
+    );
+    final seconds = configured == null || configured < 0
+        ? _defaultCooldownSeconds
+        : configured;
+    return Duration(seconds: seconds);
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
 
+    await _initializeRemoteConfig();
     try {
       await MobileAds.instance.initialize();
       _isInitialized = true;
@@ -39,6 +72,30 @@ class AppAdService {
     } catch (_) {
       _isInitialized = false;
     }
+  }
+
+  bool bannerEnabled(BannerPlacement placement) {
+    if (!_remoteDefaultsReady) return true;
+    return _remoteConfig?.getBool(
+          'ads_banner_${placement.name}_enabled',
+        ) ??
+        true;
+  }
+
+  String bannerUnitId(BannerPlacement placement) {
+    if (!_remoteDefaultsReady) return AdMobConfig.bannerUnitId;
+    final platform = _platformKey;
+    final placementId = _remoteConfig
+            ?.getString('ads_banner_${placement.name}_unit_id_$platform')
+            .trim() ??
+        '';
+    if (placementId.isNotEmpty) return placementId;
+
+    final globalId = _remoteConfig
+            ?.getString('ads_banner_unit_id_$platform')
+            .trim() ??
+        '';
+    return globalId.isEmpty ? AdMobConfig.bannerUnitId : globalId;
   }
 
   Future<void> recordImportantAction(ImportantAdAction action) async {
@@ -49,10 +106,8 @@ class AppAdService {
     await _preferences.setInt(_importantActionCountKey, nextCount);
     await _preferences.setString(_lastImportantActionKey, action.name);
 
-    if (nextCount < _importantActionsThreshold) {
-      if (_interstitialAd == null) {
-        unawaited(_loadInterstitial());
-      }
+    if (nextCount < actionFrequency) {
+      if (_interstitialAd == null) unawaited(_loadInterstitial());
       return;
     }
 
@@ -68,8 +123,9 @@ class AppAdService {
     await _preferences.setString(_lastHomeVisibleAtKey, now.toIso8601String());
 
     final previous = previousRaw == null ? null : DateTime.tryParse(previousRaw);
-    if (previous == null) return;
-    if (now.difference(previous) < _returnHomeMinimumDelay) return;
+    if (previous == null || now.difference(previous) < _returnHomeMinimumDelay) {
+      return;
+    }
 
     await recordImportantAction(
       ImportantAdAction.returnedHomeAfterSeveralMinutes,
@@ -83,12 +139,45 @@ class AppAdService {
     final lastShownDate = _preferences.getString(
       _lastDisclaimerInterstitialDateKey,
     );
-
     if (lastShownDate == today) return;
 
     final wasShown = await _showInterstitial();
     if (wasShown) {
       await _preferences.setString(_lastDisclaimerInterstitialDateKey, today);
+    }
+  }
+
+  Future<void> _initializeRemoteConfig() async {
+    final remoteConfig = _remoteConfig;
+    if (remoteConfig == null) return;
+
+    try {
+      await remoteConfig.setConfigSettings(
+        RemoteConfigSettings(
+          fetchTimeout: const Duration(seconds: 8),
+          minimumFetchInterval: kDebugMode
+              ? const Duration(minutes: 1)
+              : const Duration(hours: 1),
+        ),
+      );
+      await remoteConfig.setDefaults({
+        'ads_interstitial_action_frequency': _defaultActionFrequency,
+        'ads_interstitial_cooldown_seconds': _defaultCooldownSeconds,
+        'ads_interstitial_unit_id_android': '',
+        'ads_interstitial_unit_id_ios': '',
+        'ads_banner_unit_id_android': '',
+        'ads_banner_unit_id_ios': '',
+        for (final placement in BannerPlacement.values)
+          'ads_banner_${placement.name}_enabled': true,
+        for (final placement in BannerPlacement.values)
+          'ads_banner_${placement.name}_unit_id_android': '',
+        for (final placement in BannerPlacement.values)
+          'ads_banner_${placement.name}_unit_id_ios': '',
+      });
+      _remoteDefaultsReady = true;
+      await remoteConfig.fetchAndActivate();
+    } catch (_) {
+      // Defaults and compile-time test IDs keep ads non-blocking when offline.
     }
   }
 
@@ -99,7 +188,7 @@ class AppAdService {
 
     _isLoadingInterstitial = true;
     InterstitialAd.load(
-      adUnitId: AdMobConfig.interstitialUnitId,
+      adUnitId: _interstitialUnitId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
@@ -116,7 +205,7 @@ class AppAdService {
   }
 
   Future<bool> _showInterstitial() async {
-    if (_isShowingInterstitial) return false;
+    if (_isShowingInterstitial || !_cooldownElapsed) return false;
 
     final ad = _interstitialAd;
     if (ad == null) {
@@ -127,8 +216,15 @@ class AppAdService {
     final completer = Completer<bool>();
     _interstitialAd = null;
     _isShowingInterstitial = true;
-
     ad.fullScreenContentCallback = FullScreenContentCallback<InterstitialAd>(
+      onAdShowedFullScreenContent: (_) {
+        unawaited(
+          _preferences.setString(
+            _lastInterstitialShownAtKey,
+            DateTime.now().toIso8601String(),
+          ),
+        );
+      },
       onAdDismissedFullScreenContent: (shownAd) {
         shownAd.dispose();
         _isShowingInterstitial = false;
@@ -146,6 +242,25 @@ class AppAdService {
     ad.show();
     return completer.future;
   }
+
+  bool get _cooldownElapsed {
+    final raw = _preferences.getString(_lastInterstitialShownAtKey);
+    final lastShown = raw == null ? null : DateTime.tryParse(raw);
+    return lastShown == null ||
+        DateTime.now().difference(lastShown) >= interstitialCooldown;
+  }
+
+  String get _interstitialUnitId {
+    if (!_remoteDefaultsReady) return AdMobConfig.interstitialUnitId;
+    final configured = _remoteConfig
+            ?.getString('ads_interstitial_unit_id_$_platformKey')
+            .trim() ??
+        '';
+    return configured.isEmpty ? AdMobConfig.interstitialUnitId : configured;
+  }
+
+  String get _platformKey =>
+      defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
 
   String _dateKey(DateTime value) {
     final month = value.month.toString().padLeft(2, '0');

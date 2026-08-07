@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
-import '../../core/services/ad_mob_config.dart';
+import '../../core/services/app_ad_service.dart';
+import '../state/app_scope.dart';
 
 class AdaptiveBannerAd extends StatefulWidget {
   const AdaptiveBannerAd({
+    this.placement = BannerPlacement.home,
     this.margin = EdgeInsets.zero,
     this.maxHeight = 72,
     super.key,
   });
 
+  final BannerPlacement placement;
   final EdgeInsetsGeometry margin;
   final double maxHeight;
 
@@ -31,6 +34,14 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
 
   @override
   Widget build(BuildContext context) {
+    final adService = AppScope.adsOf(context);
+    if (!adService.bannerEnabled(widget.placement)) {
+      _bannerAd?.dispose();
+      _bannerAd = null;
+      _adSize = null;
+      return const SizedBox.shrink();
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth.truncate();
@@ -73,7 +84,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     }
 
     final bannerAd = BannerAd(
-      adUnitId: AdMobConfig.bannerUnitId,
+      adUnitId: AppScope.adsOf(context).bannerUnitId(widget.placement),
       size: size,
       request: const AdRequest(),
       listener: BannerAdListener(

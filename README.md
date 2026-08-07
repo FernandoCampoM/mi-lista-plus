@@ -75,7 +75,24 @@ Si Firebase no esta configurado, la app abre igual con datos semilla locales de 
 
 ## Configuracion AdMob
 
-La app integra `google_mobile_ads` para banners adaptativos e intersticiales. Por defecto usa IDs oficiales de prueba de Google para evitar trafico invalido durante desarrollo.
+La app integra `google_mobile_ads` para banners adaptativos e intersticiales. Por defecto usa IDs oficiales de prueba de Google para evitar trafico invalido durante desarrollo. Firebase Remote Config puede reemplazar esos valores sin publicar una nueva version.
+
+Configura estos parametros en Remote Config:
+
+| Parametro | Tipo | Predeterminado | Uso |
+| --- | --- | --- | --- |
+| `ads_interstitial_action_frequency` | Numero | `10` | Acciones importantes requeridas antes de intentar mostrar un intersticial. |
+| `ads_interstitial_cooldown_seconds` | Numero | `180` | Espera minima entre intersticiales. |
+| `ads_interstitial_unit_id_android` | Texto | Vacio | ID remoto de intersticial para Android. |
+| `ads_interstitial_unit_id_ios` | Texto | Vacio | ID remoto de intersticial para iOS. |
+| `ads_banner_unit_id_android` | Texto | Vacio | ID global de banner para Android. |
+| `ads_banner_unit_id_ios` | Texto | Vacio | ID global de banner para iOS. |
+| `ads_banner_home_enabled` | Booleano | `true` | Banner de inicio. |
+| `ads_banner_simulations_enabled` | Booleano | `true` | Banner de simulaciones. |
+| `ads_banner_inventory_enabled` | Booleano | `true` | Banner de inventario. |
+| `ads_banner_sales_enabled` | Booleano | `true` | Banner de registro de ventas. |
+
+Cada ubicacion tambien acepta un ID propio con el formato `ads_banner_<ubicacion>_unit_id_android` o `ads_banner_<ubicacion>_unit_id_ios`. Por ejemplo: `ads_banner_inventory_unit_id_android`. Si queda vacio, se usa el ID global y luego el ID de prueba/compilacion como respaldo.
 
 Cuando tengas los IDs reales, ejecuta con variables de entorno:
 
@@ -92,9 +109,10 @@ Cuando generes las carpetas nativas con `flutter create`, agrega tambien el App 
 - Android: `android/app/src/main/AndroidManifest.xml`, dentro de `<application>`.
 - iOS: `ios/Runner/Info.plist`.
 
-Los intersticiales se muestran con control de frecuencia:
+Los intersticiales se muestran con control de frecuencia remoto:
 
-- Cada 10 acciones importantes como maximo.
+- Cada 10 acciones importantes de forma predeterminada.
+- Con una espera minima predeterminada de 180 segundos entre anuncios.
 - Acciones importantes: cambiar pais, terminar una simulacion, compartir/exportar una simulacion y volver al inicio despues de varios minutos.
 - Al abrir "Descargo de responsabilidad", solo se intenta mostrar un intersticial la primera vez del dia.
 
@@ -107,6 +125,14 @@ Los intersticiales se muestran con control de frecuencia:
 5. Carrito: agregar/restar cantidades, seleccionar descuento y generar simulacion.
 6. Simulaciones: debe aparecer la simulacion creada, permitir abrir detalle, editar y eliminar.
 7. Anuncios: en desarrollo deben cargar IDs de prueba; valida banner compacto en Home, banner al final de Simulaciones e intersticiales solo despues de las reglas anteriores.
+8. Edicion: abre una simulacion, selecciona Editar, vuelve a agregar productos y confirma que conserva el mismo ID.
+9. Inventario: crea existencias, edita cantidades, registra ventas y confirma que no permite superar el stock.
+10. Obsequios: registra un producto como obsequio y confirma venta en cero, costo positivo y ganancia negativa.
+11. Historial: cambia de mes y valida ventas, puntos, ganancias y producto mas vendido.
+12. Detalle de venta: valida productos, valores historicos, puntos y resumen financiero.
+13. Edicion: reduce y aumenta cantidades, comprobando que el inventario se compense.
+14. Cancelacion: confirma que devuelve existencias y deja de sumar en las metricas.
+15. Eliminacion: confirma que una venta completada devuelve existencias y una cancelada no las duplica.
 
 ## Mejoras futuras
 

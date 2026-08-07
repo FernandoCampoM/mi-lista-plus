@@ -24,7 +24,7 @@ const supportedCountries = [
   Country(code: 'BRA', name: 'Brasil', currencyCode: 'BRL', flagEmoji: '🇧🇷', locale: 'pt_BR'),
   Country(code: 'BEL', name: 'Bélgica', currencyCode: 'EUR', flagEmoji: '🇧🇪', locale: 'fr_BE'),
   Country(code: 'CHL', name: 'Chile', currencyCode: 'CLP', flagEmoji: '🇨🇱', locale: 'es_CL'),
-  
+
   Country(code: 'CRI', name: 'Costa Rica', currencyCode: 'CRC', flagEmoji: '🇨🇷', locale: 'es_CR'),
   Country(code: 'ECU', name: 'Ecuador', currencyCode: 'USD', flagEmoji: '🇪🇨', locale: 'es_EC'),
   Country(code: 'SLV', name: 'El Salvador', currencyCode: 'USD', flagEmoji: '🇸🇻', locale: 'es_SV'),

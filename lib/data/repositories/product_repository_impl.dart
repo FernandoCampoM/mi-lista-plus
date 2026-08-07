@@ -4,7 +4,9 @@ import '../../core/errors/app_exception.dart';
 import '../../core/services/connectivity_service.dart';
 import '../../core/services/product_image_cache_service.dart';
 import '../../domain/entities/country.dart';
+import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/product.dart';
+import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../datasources/firestore_product_remote_data_source.dart';
@@ -128,5 +130,41 @@ class ProductRepositoryImpl implements ProductRepository {
   @override
   Future<void> deleteSimulations(String countryCode, Set<String> simulationIds) {
     return _localStore.deleteSimulations(countryCode, simulationIds);
+  }
+
+  @override
+  Future<List<InventoryItem>> loadInventory(String countryCode) async {
+    return _localStore.loadInventory(countryCode);
+  }
+
+  @override
+  Future<void> saveInventory(
+    String countryCode,
+    List<InventoryItem> inventory,
+  ) {
+    return _localStore.saveInventory(countryCode, inventory);
+  }
+
+  @override
+  Future<List<Sale>> loadSales(String countryCode) async {
+    return _localStore.loadSales(countryCode);
+  }
+
+  @override
+  Future<void> registerSale(
+    String countryCode,
+    List<InventoryItem> inventory,
+    Sale sale,
+  ) {
+    return _localStore.registerSale(countryCode, inventory, sale);
+  }
+
+  @override
+  Future<void> saveSalesAndInventory(
+    String countryCode,
+    List<InventoryItem> inventory,
+    List<Sale> sales,
+  ) {
+    return _localStore.saveSalesAndInventory(countryCode, inventory, sales);
   }
 }

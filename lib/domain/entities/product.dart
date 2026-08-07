@@ -33,4 +33,9 @@ class Product {
     if (!hasDiscounts || discountPercent == 0) return suggestedPrice;
     return discountPrices[discountPercent] ?? suggestedPrice;
   }
+
+  double? get costPerPointAt40 {
+    if (points <= 0) return null;
+    return priceForDiscount(40) / points;
+  }
 }

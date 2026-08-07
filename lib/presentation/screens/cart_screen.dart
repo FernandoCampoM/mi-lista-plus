@@ -21,17 +21,15 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   final customerNameController = TextEditingController();
-  late AppState _state;
   bool _loadedEditingName = false;
-  bool _simulationWasSaved = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _state = AppScope.of(context);
+    final state = AppScope.of(context);
     if (_loadedEditingName) return;
 
-    final editingSimulation = _state.editingSimulation;
+    final editingSimulation = state.editingSimulation;
     final customerName = editingSimulation?.customerName.trim();
     if (customerName != null && customerName != 'Cliente') {
       customerNameController.text = customerName;
@@ -41,9 +39,6 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   void dispose() {
-    if (!_simulationWasSaved) {
-      _state.clearEditingSimulation(notify: false);
-    }
     customerNameController.dispose();
     super.dispose();
   }
@@ -185,25 +180,7 @@ class _CartScreenState extends State<CartScreen> {
                         : 'GENERAR SIMULACION',
                     onPressed: state.cartItems.isEmpty
                         ? null
-                        : () async {
-                            final simulation = await state.createSimulation(
-                              customerName: customerNameController.text,
-                            );
-                            _simulationWasSaved = true;
-                            await AppScope.adsOf(context).recordImportantAction(
-                              ImportantAdAction.simulationGenerated,
-                            );
-                            if (context.mounted) {
-                              await Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => SimulationSuccessScreen(
-                                    simulation: simulation,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
+                        : () => _generateSimulation(state),
                   ),
                   const SizedBox(height: 10),
                   PrimaryButton(
@@ -211,6 +188,13 @@ class _CartScreenState extends State<CartScreen> {
                     outlined: true,
                     onPressed: () => Navigator.pop(context),
                   ),
+                  if (isEditingSimulation) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => _cancelEditing(state),
+                      child: const Text('CANCELAR EDICIÓN'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -218,5 +202,113 @@ class _CartScreenState extends State<CartScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _generateSimulation(AppState state) async {
+    final discount = await _confirmDiscount(state.selectedDiscount);
+    if (discount == null || !mounted) return;
+
+    try {
+      state.setDiscount(discount);
+      final simulation = await state.createSimulation(
+        customerName: customerNameController.text,
+      );
+      await AppScope.adsOf(context).recordImportantAction(
+        ImportantAdAction.simulationGenerated,
+      );
+      if (!mounted) return;
+
+      await Navigator.pushReplacement(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SimulationSuccessScreen(simulation: simulation),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar: $error')),
+      );
+    }
+  }
+
+  Future<int?> _confirmDiscount(int currentDiscount) {
+    var selected = currentDiscount;
+    const options = [0, 25, 30, 35, 40];
+
+    return showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Confirmar descuento',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  currentDiscount == 0
+                      ? 'Actualmente: precio sugerido'
+                      : 'Actualmente: descuento $currentDiscount%',
+                ),
+                const SizedBox(height: 10),
+                ...options.map(
+                  (option) => RadioListTile<int>(
+                    value: option,
+                    groupValue: selected,
+                    title: Text(
+                      option == 0 ? 'Precio sugerido' : 'Descuento $option%',
+                    ),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setSheetState(() => selected = value);
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                PrimaryButton(
+                  label: 'CONFIRMAR Y GENERAR',
+                  onPressed: () => Navigator.pop(sheetContext, selected),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelEditing(AppState state) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Cancelar edición'),
+            content: const Text(
+              'Se descartarán los cambios realizados en esta simulación.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('VOLVER'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('DESCARTAR'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    state.cancelSimulationEditing();
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 }

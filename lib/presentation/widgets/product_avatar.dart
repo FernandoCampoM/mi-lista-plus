@@ -3,19 +3,26 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/product_image_cache_service.dart';
 import '../../domain/entities/product.dart';
+import '../screens/product_image_viewer_screen.dart';
 
 class ProductAvatar extends StatelessWidget {
-  const ProductAvatar({required this.product, this.size = 54, super.key});
+  const ProductAvatar({
+    required this.product,
+    this.size = 54,
+    this.enablePreview = true,
+    super.key,
+  });
 
   final Product product;
   final double size;
+  final bool enablePreview;
 
   @override
   Widget build(BuildContext context) {
     final trimmedName = product.name.trim();
     final label = trimmedName.isEmpty ? '?' : trimmedName[0].toUpperCase();
 
-    return Container(
+    final avatar = Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
@@ -67,6 +74,22 @@ class ProductAvatar extends StatelessWidget {
                 ),
               ),
             ),
+    );
+
+    if (!enablePreview || product.imageUrl.trim().isEmpty) return avatar;
+    return Semantics(
+      button: true,
+      label: 'Ampliar imagen de ${product.name}',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => ProductImageViewerScreen(product: product),
+          ),
+        ),
+        child: avatar,
+      ),
     );
   }
 }

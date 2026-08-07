@@ -11,12 +11,14 @@ class AppHeader extends StatelessWidget {
     required this.title,
     this.showBack = false,
     this.actions = const [],
+    this.titleFontSize = 26,
     super.key,
   });
 
   final String title;
   final bool showBack;
   final List<Widget> actions;
+  final double titleFontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +56,7 @@ class AppHeader extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
-                    fontSize: 26,
+                    fontSize: titleFontSize,
                   ),
             ),
           ),

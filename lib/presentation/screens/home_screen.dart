@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/cart_badge_button.dart';
 import 'product_list_screen.dart';
+import 'inventory_screen.dart';
 import 'simulation_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -294,6 +296,7 @@ class _SimulationListState extends State<_SimulationList> {
               itemBuilder: (context, index) {
                 if (index == state.simulations.length) {
                   return const AdaptiveBannerAd(
+                    placement: BannerPlacement.simulations,
                     margin: EdgeInsets.only(top: 8, bottom: 10),
                     maxHeight: 72,
                   );
@@ -429,10 +432,42 @@ class _BottomNav extends StatelessWidget {
             color: AppColors.purple,
             borderRadius: BorderRadius.circular(32),
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _BottomItem(icon: Icons.inventory_2, label: 'Productos', active: true),
+              const Expanded(
+                child: _BottomItem(
+                  icon: Icons.shopping_bag_outlined,
+                  label: 'Productos',
+                  active: true,
+                ),
+              ),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Inventario',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const InventoryScreen(),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.point_of_sale_outlined,
+                  label: 'Ventas',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const InventoryScreen(
+                        initialSection: InventorySection.sales,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -446,23 +481,31 @@ class _BottomItem extends StatelessWidget {
     required this.icon,
     required this.label,
     this.active = false,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
   final bool active;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: active ? AppColors.orange : Colors.white54, size: 22),
-        Text(
-          label,
-          style: TextStyle(color: active ? Colors.white : Colors.white54, fontSize: 11),
-        ),
-      ],
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: active ? AppColors.orange : Colors.white70, size: 22),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.white : Colors.white70,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
