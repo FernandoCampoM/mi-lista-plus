@@ -12,6 +12,7 @@ import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
 import '../widgets/quantity_control.dart';
+import 'sale_product_picker_screen.dart';
 
 class RegisterSaleScreen extends StatefulWidget {
   const RegisterSaleScreen({
@@ -35,13 +36,17 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
   int discountPercent = 40;
   bool saving = false;
   bool initialized = false;
-  String productQuery = '';
   bool receivedAmountWasEdited = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (initialized) return;
+    final state = AppScope.of(context);
+    final availableByProductId = {
+      for (final item in state.inventoryAvailableForSale(widget.editingSale))
+        item.product.id: item,
+    };
     final source = widget.editingSale ?? widget.templateSale;
     if (source != null) {
       customerController.text = source.customerName == 'Cliente'
@@ -51,8 +56,12 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         discountPercent = source.items.first.discountPercent;
       }
       for (final item in source.items) {
-        quantities[item.productId] = item.quantity;
-        if (item.isGift) giftProductIds.add(item.productId);
+        final available = availableByProductId[item.productId]?.quantity ?? 0;
+        final quantity = item.quantity.clamp(0, available).toInt();
+        if (quantity > 0) {
+          quantities[item.productId] = quantity;
+          if (item.isGift) giftProductIds.add(item.productId);
+        }
       }
       if (widget.editingSale != null) {
         final received = source.effectiveReceivedAmount;
@@ -83,12 +92,13 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       widget.editingSale,
     );
     final isEditing = widget.editingSale != null;
-    final normalizedQuery = productQuery.trim().toLowerCase();
-    final filteredInventory = availableInventory.where((item) {
-      return normalizedQuery.isEmpty ||
-          item.product.name.toLowerCase().contains(normalizedQuery) ||
-          item.product.code.toLowerCase().contains(normalizedQuery);
-    }).toList();
+    final selectedInventory = availableInventory
+        .where((item) => (quantities[item.product.id] ?? 0) > 0)
+        .toList();
+    final hasProductsToAdd = availableInventory.any(
+      (item) =>
+          item.quantity > 0 && (quantities[item.product.id] ?? 0) == 0,
+    );
     final calculatedTotal = _totalSale(availableInventory);
     final receivedAmount = _receivedAmount ?? calculatedTotal;
 
@@ -136,41 +146,67 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                   },
                 ),
                 const SizedBox(height: 18),
-                const Text(
-                  'Productos vendidos',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  onChanged: (value) => setState(() => productQuery = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    hintText: 'Buscar por nombre o código...',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                if (filteredInventory.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: Text('No se encontraron productos.')),
-                  )
-                else
-                  ...filteredInventory.map(
-                    (item) => _SaleProductRow(
-                      item: item,
-                      quantity: quantities[item.product.id] ?? 0,
-                      isGift: giftProductIds.contains(item.product.id),
-                      discountPercent: discountPercent,
-                      formatter: formatter,
-                      onRemove: (quantities[item.product.id] ?? 0) == 0
-                          ? null
-                          : () => _changeQuantity(item, -1),
-                      onAdd: (quantities[item.product.id] ?? 0) >= item.quantity
-                          ? null
-                          : () => _changeQuantity(item, 1),
-                      onGiftChanged: (checked) => _setGift(item, checked),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Productos seleccionados',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
                     ),
+                    if (selectedInventory.isNotEmpty)
+                      Text(
+                        '${selectedInventory.length}',
+                        style: const TextStyle(
+                          color: AppColors.purple,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (selectedInventory.isEmpty)
+                  const _EmptySelectedProducts()
+                else
+                  ...selectedInventory.map(
+                    (item) {
+                      final historical = _historicalItem(item.product.id);
+                      return _SaleProductRow(
+                        item: item,
+                        quantity: quantities[item.product.id] ?? 0,
+                        isGift: giftProductIds.contains(item.product.id),
+                        suggestedUnitPrice: historical?.suggestedUnitPrice ??
+                            item.product.suggestedPrice,
+                        costUnitPrice: historical?.costUnitPrice ??
+                            item.product.priceForDiscount(discountPercent),
+                        formatter: formatter,
+                        onRemove: (quantities[item.product.id] ?? 0) <= 1
+                            ? null
+                            : () => _changeQuantity(item, -1),
+                        onAdd:
+                            (quantities[item.product.id] ?? 0) >= item.quantity
+                                ? null
+                                : () => _changeQuantity(item, 1),
+                        onGiftChanged: (checked) => _setGift(item, checked),
+                        onDelete: () => _removeProduct(item.product.id),
+                      );
+                    },
                   ),
+                const SizedBox(height: 2),
+                OutlinedButton.icon(
+                  onPressed: hasProductsToAdd
+                      ? () => _openProductPicker(availableInventory)
+                      : null,
+                  icon: const Icon(Icons.add),
+                  label: Text(
+                    selectedInventory.isEmpty
+                        ? 'AGREGAR PRODUCTOS'
+                        : 'AGREGAR OTRO PRODUCTO',
+                  ),
+                ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: receivedAmountController,
@@ -209,7 +245,9 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                     : isEditing
                         ? 'GUARDAR CAMBIOS'
                         : 'REGISTRAR VENTA',
-                onPressed: saving ? null : _registerSale,
+                onPressed: saving || selectedInventory.isEmpty
+                    ? null
+                    : _registerSale,
               ),
             ),
           ),
@@ -234,6 +272,40 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         giftProductIds.add(item.product.id);
       } else {
         giftProductIds.remove(item.product.id);
+      }
+      _updateDefaultReceivedAmount();
+    });
+  }
+
+  void _removeProduct(String productId) {
+    setState(() {
+      quantities.remove(productId);
+      giftProductIds.remove(productId);
+      _updateDefaultReceivedAmount();
+    });
+  }
+
+  Future<void> _openProductPicker(
+    List<InventoryItem> availableInventory,
+  ) async {
+    final selectedIds = quantities.entries
+        .where((entry) => entry.value > 0)
+        .map((entry) => entry.key)
+        .toSet();
+    final addedProductIds = await Navigator.push<Set<String>>(
+      context,
+      MaterialPageRoute<Set<String>>(
+        builder: (_) => SaleProductPickerScreen(
+          inventory: availableInventory,
+          excludedProductIds: selectedIds,
+        ),
+      ),
+    );
+    if (!mounted || addedProductIds == null || addedProductIds.isEmpty) return;
+
+    setState(() {
+      for (final productId in addedProductIds) {
+        quantities.putIfAbsent(productId, () => 1);
       }
       _updateDefaultReceivedAmount();
     });
@@ -331,7 +403,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
           ),
         ),
       );
-      Navigator.pop(context);
+      Navigator.pop(context, sale);
     } catch (error) {
       if (!mounted) return;
       setState(() => saving = false);
@@ -347,26 +419,29 @@ class _SaleProductRow extends StatelessWidget {
     required this.item,
     required this.quantity,
     required this.isGift,
-    required this.discountPercent,
+    required this.suggestedUnitPrice,
+    required this.costUnitPrice,
     required this.formatter,
     required this.onRemove,
     required this.onAdd,
     required this.onGiftChanged,
+    required this.onDelete,
   });
 
   final InventoryItem item;
   final int quantity;
   final bool isGift;
-  final int discountPercent;
+  final double suggestedUnitPrice;
+  final double costUnitPrice;
   final CurrencyFormatter formatter;
   final VoidCallback? onRemove;
   final VoidCallback? onAdd;
   final ValueChanged<bool> onGiftChanged;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final product = item.product;
-    final cost = product.priceForDiscount(discountPercent);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -391,11 +466,17 @@ class _SaleProductRow extends StatelessWidget {
                     ),
                     Text('Disponibles: ${item.quantity}'),
                     Text(
-                      'Público ${formatter.money(product.suggestedPrice)} · '
-                      'Costo ${formatter.money(cost)}',
+                      'Público ${formatter.money(suggestedUnitPrice)} · '
+                      'Costo ${formatter.money(costUnitPrice)}',
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                tooltip: 'Eliminar producto',
+                onPressed: onDelete,
+                color: AppColors.danger,
+                icon: const Icon(Icons.delete_outline),
               ),
             ],
           ),
@@ -408,9 +489,49 @@ class _SaleProductRow extends StatelessWidget {
                 onAdd: onAdd,
               ),
               const Spacer(),
-              Checkbox(value: isGift, onChanged: (value) => onGiftChanged(value ?? false)),
+              Checkbox(
+                value: isGift,
+                onChanged: (value) => onGiftChanged(value ?? false),
+              ),
               const Text('Obsequio'),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptySelectedProducts extends StatelessWidget {
+  const _EmptySelectedProducts();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 26),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: const Column(
+        children: [
+          Icon(
+            Icons.add_shopping_cart_outlined,
+            size: 42,
+            color: AppColors.muted,
+          ),
+          SizedBox(height: 10),
+          Text(
+            'Aun no has agregado productos.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Usa el boton de abajo para seleccionar productos del inventario.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.muted, fontSize: 12),
           ),
         ],
       ),

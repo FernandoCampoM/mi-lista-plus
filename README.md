@@ -133,6 +133,10 @@ Los intersticiales se muestran con control de frecuencia remoto:
 13. Edicion: reduce y aumenta cantidades, comprobando que el inventario se compense.
 14. Cancelacion: confirma que devuelve existencias y deja de sumar en las metricas.
 15. Eliminacion: confirma que una venta completada devuelve existencias y una cancelada no las duplica.
+16. Selector de venta: confirma que el formulario inicia sin productos, permite
+    seleccionar varios desde el buscador y solo muestra los elegidos.
+17. Edicion de venta: valida que el selector excluya productos ya agregados y
+    que permita usar el inventario actual mas las unidades de la venta original.
 
 ## Mejoras futuras
 

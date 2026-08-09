@@ -118,9 +118,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _openRegisterSale() async {
-    await Navigator.push(
+    await Navigator.push<Sale>(
       context,
-      MaterialPageRoute<void>(builder: (_) => const RegisterSaleScreen()),
+      MaterialPageRoute<Sale>(builder: (_) => const RegisterSaleScreen()),
     );
   }
 

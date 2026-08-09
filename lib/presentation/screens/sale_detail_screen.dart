@@ -136,19 +136,27 @@ class SaleDetailScreen extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context, Sale sale) async {
-    await Navigator.push(
+    await Navigator.push<Sale>(
       context,
-      MaterialPageRoute<void>(
+      MaterialPageRoute<Sale>(
         builder: (_) => RegisterSaleScreen(editingSale: sale),
       ),
     );
   }
 
   Future<void> _duplicate(BuildContext context, Sale sale) async {
-    await Navigator.push(
+    final duplicate = await Navigator.push<Sale>(
+      context,
+      MaterialPageRoute<Sale>(
+        builder: (_) => RegisterSaleScreen(templateSale: sale),
+      ),
+    );
+    if (!context.mounted || duplicate == null) return;
+
+    await Navigator.pushReplacement(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => RegisterSaleScreen(templateSale: sale),
+        builder: (_) => SaleDetailScreen(saleId: duplicate.id),
       ),
     );
   }
