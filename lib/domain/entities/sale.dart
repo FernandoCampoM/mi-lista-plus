@@ -1,4 +1,7 @@
+import 'product.dart';
+
 enum SaleStatus { completed, cancelled }
+enum DeliveryStatus { pending, delivered }
 
 class SaleItem {
   const SaleItem({
@@ -12,12 +15,14 @@ class SaleItem {
     required this.isGift,
     this.productCode = '',
     this.imageUrl = '',
+    this.category,
   });
 
   final String productId;
   final String productName;
   final String productCode;
   final String imageUrl;
+  final ProductCategory? category;
   final int quantity;
   final double suggestedUnitPrice;
   final double costUnitPrice;
@@ -30,6 +35,20 @@ class SaleItem {
   double get totalCost => costUnitPrice * quantity;
   double get totalProfit => totalSale - totalCost;
   int get totalPoints => pointsPerUnit * quantity;
+
+  SaleItem copyWith({ProductCategory? category}) => SaleItem(
+        productId: productId,
+        productName: productName,
+        productCode: productCode,
+        imageUrl: imageUrl,
+        category: category ?? this.category,
+        quantity: quantity,
+        suggestedUnitPrice: suggestedUnitPrice,
+        costUnitPrice: costUnitPrice,
+        pointsPerUnit: pointsPerUnit,
+        discountPercent: discountPercent,
+        isGift: isGift,
+      );
 }
 
 class Sale {
@@ -43,6 +62,9 @@ class Sale {
     this.status = SaleStatus.completed,
     this.receivedAmount,
     this.sourceSimulationId,
+    this.customerId,
+    this.deliveryStatus = DeliveryStatus.pending,
+    this.deliveredAt,
   });
 
   final String id;
@@ -53,9 +75,13 @@ class Sale {
   final SaleStatus status;
   final double? receivedAmount;
   final String? sourceSimulationId;
+  final String? customerId;
+  final DeliveryStatus deliveryStatus;
+  final DateTime? deliveredAt;
   final List<SaleItem> items;
 
   bool get isCompleted => status == SaleStatus.completed;
+  bool get isDelivered => deliveryStatus == DeliveryStatus.delivered;
   double get totalSuggested =>
       items.fold(0, (total, item) => total + item.totalSuggested);
   double get totalSale =>
@@ -78,6 +104,10 @@ class Sale {
     SaleStatus? status,
     double? receivedAmount,
     List<SaleItem>? items,
+    String? customerId,
+    DeliveryStatus? deliveryStatus,
+    DateTime? deliveredAt,
+    bool clearDeliveredAt = false,
   }) {
     return Sale(
       id: id,
@@ -88,6 +118,9 @@ class Sale {
       status: status ?? this.status,
       receivedAmount: receivedAmount ?? this.receivedAmount,
       sourceSimulationId: sourceSimulationId,
+      customerId: customerId ?? this.customerId,
+      deliveryStatus: deliveryStatus ?? this.deliveryStatus,
+      deliveredAt: clearDeliveredAt ? null : deliveredAt ?? this.deliveredAt,
       items: items ?? this.items,
     );
   }

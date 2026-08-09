@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
@@ -67,6 +68,20 @@ class SaleDetailScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 _SaleMetrics(sale: sale, formatter: formatter),
+                const SizedBox(height: 10),
+                ListTile(
+                  tileColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: AppColors.line)),
+                  leading: Icon(sale.isDelivered ? Icons.check_circle : Icons.local_shipping_outlined, color: sale.isDelivered ? AppColors.green : AppColors.orange),
+                  title: Text(sale.isDelivered ? 'Pedido entregado' : 'Pendiente de confirmar entrega', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: sale.deliveredAt == null ? null : Text(_formatDate(sale.deliveredAt!)),
+                  trailing: !sale.isDelivered && sale.customerId != null
+                      ? TextButton(
+                          onPressed: () => _confirmDelivery(context, sale),
+                          child: const Text('CONFIRMAR'),
+                        )
+                      : null,
+                ),
                 const SizedBox(height: 22),
                 const Text(
                   'Productos vendidos',
@@ -185,6 +200,11 @@ class SaleDetailScreen extends StatelessWidget {
         false;
     if (!confirmed || !context.mounted) return;
     await AppScope.of(context).cancelSale(sale);
+    if (context.mounted) {
+      await AppScope.adsOf(context).recordImportantAction(
+        ImportantAdAction.saleCancelled,
+      );
+    }
   }
 
   Future<void> _delete(BuildContext context, Sale sale) async {
@@ -212,7 +232,20 @@ class SaleDetailScreen extends StatelessWidget {
         false;
     if (!confirmed || !context.mounted) return;
     await AppScope.of(context).deleteSale(sale);
+    if (context.mounted) {
+      await AppScope.adsOf(context).recordImportantAction(
+        ImportantAdAction.saleDeleted,
+      );
+    }
     if (context.mounted) Navigator.pop(context);
+  }
+
+  Future<void> _confirmDelivery(BuildContext context, Sale sale) async {
+    await AppScope.of(context).confirmDelivery(sale);
+    if (!context.mounted) return;
+    await AppScope.adsOf(context).recordImportantAction(
+      ImportantAdAction.deliveryConfirmed,
+    );
   }
 }
 
@@ -293,7 +326,7 @@ class _SoldProductRow extends StatelessWidget {
       countryCode: countryCode,
       name: item.productName,
       code: item.productCode,
-      category: ProductCategory.nutrition,
+      category: item.category ?? ProductCategory.nutrition,
       suggestedPrice: item.suggestedUnitPrice,
       points: item.pointsPerUnit,
       imageUrl: item.imageUrl,

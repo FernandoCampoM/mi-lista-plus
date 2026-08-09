@@ -5,18 +5,21 @@ import '../../core/services/connectivity_service.dart';
 import '../../core/services/product_image_cache_service.dart';
 import '../../domain/entities/country.dart';
 import '../../domain/entities/inventory_item.dart';
+import '../../domain/entities/inventory_movement.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../datasources/firestore_product_remote_data_source.dart';
 import '../datasources/local_store.dart';
+import '../datasources/operational_database.dart';
 
 class ProductRepositoryImpl implements ProductRepository {
   ProductRepositoryImpl({
     required LocalStore localStore,
     required FirestoreProductRemoteDataSource remoteDataSource,
     required ConnectivityService connectivityService,
+    this.operationalDatabase,
   })  : _localStore = localStore,
         _remoteDataSource = remoteDataSource,
         _connectivityService = connectivityService;
@@ -24,6 +27,7 @@ class ProductRepositoryImpl implements ProductRepository {
   final LocalStore _localStore;
   final FirestoreProductRemoteDataSource _remoteDataSource;
   final ConnectivityService _connectivityService;
+  final OperationalDatabase? operationalDatabase;
 
   @override
   Future<List<Country>> getCountries() async => supportedCountries;
@@ -114,39 +118,70 @@ class ProductRepositoryImpl implements ProductRepository {
 
   @override
   Future<void> saveSimulation(Simulation simulation) {
-    return _localStore.saveSimulation(simulation);
+    return _saveSimulation(simulation);
+  }
+
+  Future<void> _saveSimulation(Simulation simulation) async {
+    await _localStore.saveSimulation(simulation);
+    final payload = _localStore.rawOperationalValue('simulations', simulation.countryCode);
+    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', simulation.countryCode, payload);
   }
 
   @override
   Future<List<Simulation>> loadSimulations(String countryCode) async {
+    final payload = await operationalDatabase?.readSnapshot('simulations', countryCode);
+    if (payload != null) return _localStore.simulationsFromPayload(payload);
     return _localStore.loadSimulations(countryCode);
   }
 
   @override
   Future<void> deleteSimulation(String countryCode, String simulationId) {
-    return _localStore.deleteSimulation(countryCode, simulationId);
+    return _deleteSimulation(countryCode, {simulationId});
   }
 
   @override
   Future<void> deleteSimulations(String countryCode, Set<String> simulationIds) {
-    return _localStore.deleteSimulations(countryCode, simulationIds);
+    return _deleteSimulation(countryCode, simulationIds);
+  }
+
+  Future<void> _deleteSimulation(String countryCode, Set<String> ids) async {
+    await _localStore.deleteSimulations(countryCode, ids);
+    final payload = _localStore.rawOperationalValue('simulations', countryCode);
+    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', countryCode, payload);
   }
 
   @override
   Future<List<InventoryItem>> loadInventory(String countryCode) async {
+    final db = operationalDatabase;
+    if (db != null && await db.isMigrationValidated) {
+      final stock = await db.stock(countryCode);
+      final products = _localStore.loadProducts(countryCode);
+      return products
+          .where((product) => (stock[product.id] ?? 0) > 0)
+          .map((product) => InventoryItem(product: product, quantity: stock[product.id]!))
+          .toList();
+    }
     return _localStore.loadInventory(countryCode);
   }
 
   @override
   Future<void> saveInventory(
     String countryCode,
-    List<InventoryItem> inventory,
-  ) {
-    return _localStore.saveInventory(countryCode, inventory);
+    List<InventoryItem> inventory, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+  }) async {
+    await operationalDatabase?.reconcileInventory(countryCode, inventory, movementType, relatedId: relatedId, reason: reason);
+    await _localStore.saveInventory(countryCode, inventory);
+    final payload = _localStore.rawOperationalValue('inventory', countryCode);
+    if (payload != null) await operationalDatabase?.writeSnapshot('inventory', countryCode, payload);
   }
 
   @override
   Future<List<Sale>> loadSales(String countryCode) async {
+    final payload = await operationalDatabase?.readSnapshot('sales', countryCode);
+    if (payload != null) return _localStore.salesFromPayload(payload);
     return _localStore.loadSales(countryCode);
   }
 
@@ -163,8 +198,19 @@ class ProductRepositoryImpl implements ProductRepository {
   Future<void> saveSalesAndInventory(
     String countryCode,
     List<InventoryItem> inventory,
-    List<Sale> sales,
-  ) {
-    return _localStore.saveSalesAndInventory(countryCode, inventory, sales);
+    List<Sale> sales, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+    bool recordInventoryMovement = true,
+  }) async {
+    if (recordInventoryMovement) {
+      await operationalDatabase?.reconcileInventory(countryCode, inventory, movementType, relatedId: relatedId, reason: reason);
+    }
+    await _localStore.saveSalesAndInventory(countryCode, inventory, sales);
+    final salesPayload = _localStore.rawOperationalValue('sales', countryCode);
+    final inventoryPayload = _localStore.rawOperationalValue('inventory', countryCode);
+    if (salesPayload != null) await operationalDatabase?.writeSnapshot('sales', countryCode, salesPayload);
+    if (inventoryPayload != null) await operationalDatabase?.writeSnapshot('inventory', countryCode, inventoryPayload);
   }
 }

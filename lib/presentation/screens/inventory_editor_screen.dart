@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/product.dart';
 import '../models/product_sort_option.dart';
@@ -179,6 +180,11 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
     try {
       await AppScope.of(context).saveInventoryQuantities(quantities);
       dirty = false;
+      if (mounted) {
+        await AppScope.adsOf(context).recordImportantAction(
+          ImportantAdAction.inventoryUpdated,
+        );
+      }
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (!mounted) return;

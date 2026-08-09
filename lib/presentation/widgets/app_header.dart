@@ -13,6 +13,7 @@ class AppHeader extends StatelessWidget {
     this.actions = const [],
     this.titleFontSize = 26,
     this.showCountrySelector = true,
+    this.onOpenDataTransfer,
     super.key,
   });
 
@@ -21,6 +22,7 @@ class AppHeader extends StatelessWidget {
   final List<Widget> actions;
   final double titleFontSize;
   final bool showCountrySelector;
+  final VoidCallback? onOpenDataTransfer;
 
   @override
   Widget build(BuildContext context) {
@@ -161,6 +163,20 @@ class AppHeader extends StatelessWidget {
                   style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 18),
+                if (onOpenDataTransfer != null) ...[
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(sheetContext);
+                      await Future<void>.delayed(
+                        const Duration(milliseconds: 220),
+                      );
+                      if (context.mounted) onOpenDataTransfer!();
+                    },
+                    icon: const Icon(Icons.sync_alt),
+                    label: const Text('Respaldo y sincronización'),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 OutlinedButton.icon(
                   onPressed: () async {
                     Navigator.pop(sheetContext);

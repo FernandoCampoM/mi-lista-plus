@@ -10,6 +10,8 @@ import '../widgets/cart_badge_button.dart';
 import 'product_list_screen.dart';
 import 'inventory_screen.dart';
 import 'simulation_detail_screen.dart';
+import 'customers_screen.dart';
+import 'data_transfer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -39,6 +41,12 @@ class _HomeScreenState extends State<HomeScreen> {
           AppHeader(
             title: 'Productos',
             actions: const [CartBadgeButton()],
+            onOpenDataTransfer: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const DataTransferScreen(),
+              ),
+            ),
           ),
           const AdaptiveBannerAd(
             margin: EdgeInsets.fromLTRB(18, 14, 18, 0),
@@ -451,6 +459,16 @@ class _BottomNav extends StatelessWidget {
                     MaterialPageRoute<void>(
                       builder: (_) => const InventoryScreen(),
                     ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.people_outline,
+                  label: 'Clientes',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
                   ),
                 ),
               ),

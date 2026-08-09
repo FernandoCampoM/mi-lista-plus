@@ -8,11 +8,14 @@ import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../state/app_scope.dart';
+import '../state/app_state.dart';
+import '../models/sale_customer_option.dart';
 import '../widgets/app_header.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
 import '../widgets/quantity_control.dart';
+import '../widgets/customer_form_dialog.dart';
 import 'sale_product_picker_screen.dart';
 
 class RegisterSaleScreen extends StatefulWidget {
@@ -45,6 +48,9 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
   bool saving = false;
   bool initialized = false;
   bool receivedAmountWasEdited = false;
+  String? selectedCustomerId;
+  bool delivered = false;
+  DateTime? deliveredAt;
 
   @override
   void didChangeDependencies() {
@@ -58,6 +64,9 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     final saleSource = widget.editingSale ?? widget.templateSale;
     final simulationSource = widget.templateSimulation;
     if (saleSource != null) {
+      selectedCustomerId = saleSource.customerId;
+      delivered = saleSource.isDelivered;
+      deliveredAt = saleSource.deliveredAt;
       customerController.text = saleSource.customerName == 'Cliente'
           ? ''
           : saleSource.customerName;
@@ -124,6 +133,15 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     );
     final calculatedTotal = _totalSale(availableInventory);
     final receivedAmount = _receivedAmount ?? calculatedTotal;
+    final customerOptions = _customerOptions(state);
+    final customerIds = customerOptions.map((item) => item.id).toSet();
+    final dropdownCustomerId = customerIds.contains(selectedCustomerId)
+        ? selectedCustomerId
+        : null;
+    final selectedCustomerOption = customerOptions
+        .where((item) => item.id == dropdownCustomerId)
+        .firstOrNull;
+    final customerWarning = _customerWarning(selectedCustomerOption);
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -147,14 +165,77 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
             child: ListView(
               padding: const EdgeInsets.all(18),
               children: [
-                TextField(
-                  controller: customerController,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre del cliente',
-                    hintText: 'Cliente',
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: dropdownCustomerId,
+                        isExpanded: true,
+                        itemHeight: null,
+                        decoration: const InputDecoration(labelText: 'Cliente'),
+                        hint: const Text('Seleccionar cliente'),
+                        items: customerOptions
+                            .map(
+                              (option) => DropdownMenuItem(
+                                value: option.id,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        option.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        option.statusLabel,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: option.isEligible
+                                              ? AppColors.green
+                                              : AppColors.orange,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) => setState(() {
+                          selectedCustomerId = value;
+                          final option = customerOptions.firstWhere(
+                            (item) => item.id == value,
+                          );
+                          customerController.text = option.name;
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      tooltip: 'Crear cliente',
+                      onPressed: _createCustomer,
+                      icon: const Icon(Icons.person_add_alt_1),
+                    ),
+                  ],
                 ),
+                if (customerWarning != null) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    customerWarning,
+                    style: const TextStyle(
+                      color: AppColors.orange,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   value: discountPercent,
@@ -218,6 +299,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                             item.product.suggestedPrice,
                         costUnitPrice: historical?.costUnitPrice ??
                             item.product.priceForDiscount(discountPercent),
+                        pointsPerUnit: historical?.pointsPerUnit ?? item.product.points,
                         formatter: formatter,
                         onRemove: (quantities[item.product.id] ?? 0) <= 1
                             ? null
@@ -243,6 +325,25 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                         : 'AGREGAR OTRO PRODUCTO',
                   ),
                 ),
+                const SizedBox(height: 12),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('El cliente ya recibio el pedido'),
+                  subtitle: Text(delivered
+                      ? 'Entrega: ${_shortDate(deliveredAt ?? DateTime.now())}'
+                      : 'Quedara en Por confirmar entrega'),
+                  value: delivered,
+                  onChanged: (value) => setState(() {
+                    delivered = value;
+                    deliveredAt = value ? (deliveredAt ?? DateTime.now()) : null;
+                  }),
+                ),
+                if (delivered)
+                  TextButton.icon(
+                    onPressed: _pickDeliveryDate,
+                    icon: const Icon(Icons.event_outlined),
+                    label: const Text('EDITAR FECHA DE ENTREGA'),
+                  ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: receivedAmountController,
@@ -292,6 +393,31 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     );
   }
 
+  List<SaleCustomerOption> _customerOptions(AppState state) =>
+      buildSaleCustomerOptions(
+        customers: state.customers,
+        selectedCustomerId: selectedCustomerId,
+        preserveHistoricalCustomer: widget.editingSale != null,
+        historicalCustomerName:
+            widget.editingSale?.customerName ?? customerController.text,
+      );
+
+  String? _customerWarning(SaleCustomerOption? option) {
+    if (widget.editingSale == null) {
+      if (selectedCustomerId != null && option == null) {
+        return 'Selecciona un cliente activo con consentimiento para registrar la venta.';
+      }
+      return null;
+    }
+    if (option == null) {
+      return 'Venta histórica sin cliente disponible. Puedes editarla y asociar otro cliente.';
+    }
+    if (!option.isEligible) {
+      return 'Puedes editar la venta, pero este cliente no recibirá seguimientos ni mensajes.';
+    }
+    return null;
+  }
+
   void _changeQuantity(InventoryItem item, int delta) {
     final current = quantities[item.product.id] ?? 0;
     final next = (current + delta).clamp(0, item.quantity).toInt();
@@ -334,6 +460,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         builder: (_) => SaleProductPickerScreen(
           inventory: availableInventory,
           excludedProductIds: selectedIds,
+          formatter: CurrencyFormatter(AppScope.of(context).selectedCountry!),
         ),
       ),
     );
@@ -422,6 +549,9 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
               giftProductIds: giftProductIds,
               receivedAmount: _receivedAmount,
               sourceSimulationId: widget.templateSimulation?.id,
+              customerId: selectedCustomerId,
+              delivered: delivered,
+              deliveredAt: deliveredAt,
             )
           : await state.updateSale(
               originalSale: original,
@@ -430,7 +560,16 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
               quantities: quantities,
               giftProductIds: giftProductIds,
               receivedAmount: _receivedAmount,
+              customerId: selectedCustomerId,
+              delivered: delivered,
+              deliveredAt: deliveredAt,
             );
+      if (!mounted) return;
+      await AppScope.adsOf(context).recordImportantAction(
+        original == null
+            ? ImportantAdAction.saleRegistered
+            : ImportantAdAction.saleUpdated,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -450,6 +589,50 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       );
     }
   }
+
+  Future<void> _createCustomer() async {
+    final form = await showCustomerFormDialog(
+      context,
+      initialName: customerController.text,
+    );
+    if (!mounted || form == null) return;
+    try {
+      final customer = await AppScope.of(context).createCustomer(
+        name: form.name,
+        callingCode: form.callingCode,
+        phoneNumber: form.phoneNumber,
+        goal: form.goal,
+        birthday: form.birthday,
+        consentGranted: form.consentGranted,
+      );
+      if (!mounted) return;
+      await AppScope.adsOf(context).recordImportantAction(
+        ImportantAdAction.customerCreated,
+      );
+      if (!mounted) return;
+      setState(() {
+        selectedCustomerId = customer.id;
+        customerController.text = customer.name;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cliente guardado correctamente.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar el cliente: $error')),
+      );
+    }
+  }
+
+  Future<void> _pickDeliveryDate() async {
+    final current = deliveredAt ?? DateTime.now();
+    final date = await showDatePicker(context: context, initialDate: current, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
+    if (date == null || !mounted) return;
+    setState(() => deliveredAt = DateTime(date.year, date.month, date.day, current.hour, current.minute));
+  }
+
+  String _shortDate(DateTime value) => '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
 }
 
 class _SaleProductRow extends StatelessWidget {
@@ -459,6 +642,7 @@ class _SaleProductRow extends StatelessWidget {
     required this.isGift,
     required this.suggestedUnitPrice,
     required this.costUnitPrice,
+    required this.pointsPerUnit,
     required this.formatter,
     required this.onRemove,
     required this.onAdd,
@@ -471,6 +655,7 @@ class _SaleProductRow extends StatelessWidget {
   final bool isGift;
   final double suggestedUnitPrice;
   final double costUnitPrice;
+  final int pointsPerUnit;
   final CurrencyFormatter formatter;
   final VoidCallback? onRemove;
   final VoidCallback? onAdd;
@@ -507,6 +692,7 @@ class _SaleProductRow extends StatelessWidget {
                       'Público ${formatter.money(suggestedUnitPrice)} · '
                       'Costo ${formatter.money(costUnitPrice)}',
                     ),
+                    Text('$pointsPerUnit puntos por unidad · ${pointsPerUnit * quantity} puntos'),
                   ],
                 ),
               ),

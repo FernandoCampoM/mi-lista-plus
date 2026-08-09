@@ -4,17 +4,27 @@ import 'package:uuid/uuid.dart';
 import '../../domain/entities/cart_item.dart';
 import '../../domain/entities/country.dart';
 import '../../domain/entities/inventory_item.dart';
+import '../../domain/entities/inventory_movement.dart';
+import '../../domain/entities/customer.dart';
+import '../../domain/entities/follow_up.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../../domain/repositories/product_repository.dart';
+import '../../data/datasources/operational_database.dart';
+import '../../core/services/follow_up_notification_service.dart';
+import '../../core/services/encrypted_backup_service.dart';
 
 enum HomeTab { products, simulations }
 
 class AppState extends ChangeNotifier {
-  AppState(this._repository);
+  AppState(this._repository, {OperationalDatabase? operationalDatabase, FollowUpNotificationService? notificationService})
+      : _operationalDatabase = operationalDatabase,
+        _notificationService = notificationService;
 
   final ProductRepository _repository;
+  final OperationalDatabase? _operationalDatabase;
+  final FollowUpNotificationService? _notificationService;
   final _uuid = const Uuid();
 
   List<Country> countries = const [];
@@ -23,6 +33,8 @@ class AppState extends ChangeNotifier {
   List<Simulation> simulations = const [];
   List<InventoryItem> inventory = const [];
   List<Sale> sales = const [];
+  List<Customer> customers = const [];
+  List<FollowUp> followUps = const [];
   final Map<String, CartItem> _cart = {};
   String? errorMessage;
   bool isLoading = true;
@@ -52,6 +64,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     countries = await _repository.getCountries();
+    await _reloadCrm();
+    await _ensureBirthdayFollowUps();
     final countryCode = await _repository.getSelectedCountry();
     if (countryCode != null) {
       final storedCountry = countries.firstWhere(
@@ -109,10 +123,18 @@ class AppState extends ChangeNotifier {
         )
         .toList();
     final loadedSales = await _repository.loadSales(country.code);
-    sales = _assignMissingSaleNumbers(loadedSales);
-    if (sales.any((sale) => sale.number > 0) &&
-        loadedSales.any((sale) => sale.number == 0)) {
-      await _repository.saveSalesAndInventory(country.code, inventory, sales);
+    final withCategories = _assignMissingSaleCategories(loadedSales);
+    sales = _assignMissingSaleNumbers(withCategories);
+    final needsCompatibilitySave = loadedSales.any(
+      (sale) => sale.number == 0 || sale.items.any((item) => item.category == null),
+    );
+    if (needsCompatibilitySave) {
+      await _repository.saveSalesAndInventory(
+        country.code,
+        inventory,
+        sales,
+        recordInventoryMovement: false,
+      );
     }
     _cart.clear();
     editingSimulation = null;
@@ -273,6 +295,9 @@ class AppState extends ChangeNotifier {
     Set<String> giftProductIds = const {},
     double? receivedAmount,
     String? sourceSimulationId,
+    String? customerId,
+    bool delivered = false,
+    DateTime? deliveredAt,
   }) async {
     final country = selectedCountry;
     if (country == null) {
@@ -288,6 +313,15 @@ class AppState extends ChangeNotifier {
     if (sourceSimulationId != null &&
         saleForSimulation(sourceSimulationId) != null) {
       throw StateError('Esta simulacion ya fue convertida en venta.');
+    }
+    if (_operationalDatabase != null && customerId == null) {
+      throw StateError('Selecciona o crea el cliente de la venta.');
+    }
+    if (_operationalDatabase != null &&
+        !_isCustomerEligibleForNewSale(customerId)) {
+      throw StateError(
+        'El cliente debe estar activo y tener consentimiento para registrar una venta.',
+      );
     }
 
     final result = _buildSaleResult(
@@ -310,6 +344,9 @@ class AppState extends ChangeNotifier {
         result.items,
       ),
       sourceSimulationId: sourceSimulationId,
+      customerId: customerId,
+      deliveryStatus: delivered ? DeliveryStatus.delivered : DeliveryStatus.pending,
+      deliveredAt: delivered ? (deliveredAt ?? DateTime.now()) : null,
       items: result.items,
     );
 
@@ -318,9 +355,15 @@ class AppState extends ChangeNotifier {
       country.code,
       result.inventory,
       nextSales,
+      movementType: InventoryMovementType.sale,
+      relatedId: sale.id,
+      reason: 'Venta #${sale.number}',
     );
     inventory = result.inventory;
     sales = nextSales;
+    if (sale.isDelivered && sale.customerId != null) {
+      await _createDeliveryFollowUps(sale);
+    }
     notifyListeners();
     return sale;
   }
@@ -394,6 +437,9 @@ class AppState extends ChangeNotifier {
     required Map<String, int> quantities,
     Set<String> giftProductIds = const {},
     double? receivedAmount,
+    String? customerId,
+    bool? delivered,
+    DateTime? deliveredAt,
   }) async {
     final country = selectedCountry;
     if (country == null) {
@@ -403,6 +449,12 @@ class AppState extends ChangeNotifier {
       throw StateError('Una venta cancelada no se puede editar.');
     }
     _validateDiscount(discountPercent);
+    if (customerId != originalSale.customerId &&
+        !_isCustomerEligibleForNewSale(customerId)) {
+      throw StateError(
+        'Solo puedes cambiar la venta a un cliente activo con consentimiento.',
+      );
+    }
 
     final available = inventoryAvailableForSale(originalSale);
     final result = _buildSaleResult(
@@ -421,6 +473,14 @@ class AppState extends ChangeNotifier {
         receivedAmount,
         result.items,
       ),
+      customerId: customerId,
+      deliveryStatus: delivered == null
+          ? originalSale.deliveryStatus
+          : delivered ? DeliveryStatus.delivered : DeliveryStatus.pending,
+      deliveredAt: delivered == null
+          ? originalSale.deliveredAt
+          : delivered ? (deliveredAt ?? DateTime.now()) : null,
+      clearDeliveredAt: delivered == false,
     );
     final nextSales = sales
         .map((sale) => sale.id == originalSale.id ? updated : sale)
@@ -430,9 +490,17 @@ class AppState extends ChangeNotifier {
       country.code,
       result.inventory,
       nextSales,
+      movementType: InventoryMovementType.saleEdit,
+      relatedId: originalSale.id,
+      reason: 'Edicion de venta #${originalSale.number}',
     );
     inventory = result.inventory;
     sales = nextSales;
+    if (updated.isDelivered && updated.customerId != null) {
+      await _createDeliveryFollowUps(updated);
+    } else if (!updated.isDelivered) {
+      await _cancelPendingFollowUpsForSale(updated.id);
+    }
     notifyListeners();
     return updated;
   }
@@ -451,9 +519,13 @@ class AppState extends ChangeNotifier {
       country.code,
       restoredInventory,
       nextSales,
+      movementType: InventoryMovementType.saleCancellation,
+      relatedId: sale.id,
+      reason: 'Cancelacion de venta #${sale.number}',
     );
     inventory = restoredInventory;
     sales = nextSales;
+    await _cancelPendingFollowUpsForSale(sale.id);
     notifyListeners();
     return cancelled;
   }
@@ -469,9 +541,13 @@ class AppState extends ChangeNotifier {
       country.code,
       nextInventory,
       nextSales,
+      movementType: InventoryMovementType.saleCancellation,
+      relatedId: sale.id,
+      reason: 'Eliminacion de venta #${sale.number}',
     );
     inventory = nextInventory;
     sales = nextSales;
+    await _cancelPendingFollowUpsForSale(sale.id);
     notifyListeners();
   }
 
@@ -520,6 +596,9 @@ class AppState extends ChangeNotifier {
                 ? historical.productCode
                 : product.code,
             imageUrl: preserveHistorical ? historical.imageUrl : product.imageUrl,
+            category: preserveHistorical
+                ? historical.category ?? product.category
+                : product.category,
             quantity: quantity,
             suggestedUnitPrice: preserveHistorical
                 ? historical.suggestedUnitPrice
@@ -570,7 +649,7 @@ class AppState extends ChangeNotifier {
         countryCode: selectedCountry?.code ?? '',
         name: item.productName,
         code: item.productCode,
-        category: ProductCategory.nutrition,
+        category: item.category ?? ProductCategory.nutrition,
         suggestedPrice: item.suggestedUnitPrice,
         points: item.pointsPerUnit,
         imageUrl: item.imageUrl,
@@ -605,6 +684,25 @@ class AppState extends ChangeNotifier {
         .toList();
   }
 
+  List<Sale> _assignMissingSaleCategories(List<Sale> source) {
+    final productsById = {for (final product in products) product.id: product};
+    return source.map((sale) {
+      if (sale.items.every((item) => item.category != null)) return sale;
+      return sale.copyWith(
+        items: sale.items
+            .map(
+              (item) => item.category != null
+                  ? item
+                  : item.copyWith(
+                      category: productsById[item.productId]?.category ??
+                          ProductCategory.nutrition,
+                    ),
+            )
+            .toList(),
+      );
+    }).toList();
+  }
+
   void _validateDiscount(int discountPercent) {
     if (!const [25, 30, 35, 40].contains(discountPercent)) {
       throw ArgumentError.value(
@@ -632,6 +730,345 @@ class AppState extends ChangeNotifier {
       );
     }
     return value;
+  }
+
+  Future<void> _reloadCrm() async {
+    final db = _operationalDatabase;
+    if (db == null) return;
+    customers = await db.loadCustomers(includeArchived: true);
+    followUps = await db.loadFollowUps();
+    await _notificationService?.reschedule(
+      followUps, customers,
+      reminderHour: await db.reminderHour,
+    );
+  }
+
+  EncryptedBackupService get backupService {
+    final db = _operationalDatabase;
+    if (db == null) throw StateError('La base local segura no esta disponible.');
+    return EncryptedBackupService(db);
+  }
+
+  Future<void> reloadAfterImport() async {
+    await _reloadCrm();
+    final country = selectedCountry;
+    if (country != null) await loadCountry(country, persist: false);
+  }
+
+  Future<int> get reminderHour async => await _operationalDatabase?.reminderHour ?? 9;
+
+  Future<void> setReminderHour(int hour) async {
+    await _operationalDatabase?.setReminderHour(hour);
+    await _reloadCrm();
+    notifyListeners();
+  }
+
+  Future<int?> productFollowUpDurationDays(Product product) async =>
+      _operationalDatabase?.configuredDurationDays(product.id, product.countryCode, product.category);
+
+  Future<void> setProductFollowUpDuration(Product product, {required bool enabled, required int days}) async {
+    await _operationalDatabase?.saveProductDuration(
+      productId: product.id, countryCode: product.countryCode,
+      enabled: enabled, days: days,
+    );
+  }
+
+  Future<void> _ensureBirthdayFollowUps() async {
+    final db = _operationalDatabase;
+    if (db == null) return;
+    final now = DateTime.now();
+    final additions = <FollowUp>[];
+    for (final customer in customers) {
+      final birthday = customer.birthday;
+      if (birthday == null || customer.isArchived || !customer.birthdayRemindersEnabled || !customer.hasActiveConsent) continue;
+      var due = DateTime(now.year, birthday.month, birthday.day, 9);
+      if (due.isBefore(now)) due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
+      final exists = followUps.any((item) => item.customerId == customer.id && item.type == FollowUpType.birthday && item.dueAt.year == due.year);
+      if (!exists) additions.add(FollowUp(id: _uuid.v4(), customerId: customer.id, type: FollowUpType.birthday, dueAt: due, createdAt: now));
+    }
+    if (additions.isNotEmpty) {
+      await db.saveFollowUps(additions);
+      customers = await db.loadCustomers(includeArchived: true);
+      followUps = await db.loadFollowUps();
+    }
+  }
+
+  Future<Customer> saveCustomer(Customer customer) async {
+    final db = _operationalDatabase;
+    if (db == null) throw StateError('La base local segura no esta disponible.');
+    await db.saveCustomer(customer);
+    await _reloadCrm();
+    notifyListeners();
+    return customer;
+  }
+
+  Future<Customer> createCustomer({
+    required String name,
+    required String callingCode,
+    required String phoneNumber,
+    String goal = '',
+    DateTime? birthday,
+    required bool consentGranted,
+  }) async {
+    if (!consentGranted) throw StateError('Debes registrar el consentimiento del cliente.');
+    final now = DateTime.now();
+    return saveCustomer(Customer(
+      id: _uuid.v4(), name: name.trim(), callingCode: callingCode,
+      phoneNumber: phoneNumber.trim(), goal: goal.trim(), birthday: birthday,
+      consentAt: now, consentScopes: const {
+        ConsentScope.phone, ConsentScope.birthday, ConsentScope.goals, ConsentScope.notes,
+      }, createdAt: now, updatedAt: now,
+    ));
+  }
+
+  Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) async {
+    await saveCustomer(customer.copyWith(
+      followUpEnabled: false, followUpPausedUntil: until,
+      followUpPauseReason: reason ?? '',
+    ));
+    final db = _operationalDatabase;
+    if (db != null) {
+      await db.saveFollowUps(followUps
+          .where((item) => item.customerId == customer.id && item.status == FollowUpStatus.pending)
+          .map((item) => item.copyWith(status: FollowUpStatus.paused)));
+      await _reloadCrm();
+      notifyListeners();
+    }
+  }
+
+  Future<void> resumeCustomerFollowUp(Customer customer, {bool fromToday = true}) async {
+    await saveCustomer(customer.copyWith(followUpEnabled: true, clearPausedUntil: true));
+    final now = DateTime.now();
+    final db = _operationalDatabase;
+    if (db != null) {
+      await db.saveFollowUps(followUps
+          .where((item) => item.customerId == customer.id && item.status == FollowUpStatus.paused)
+          .map((item) => item.copyWith(
+                status: FollowUpStatus.pending,
+                dueAt: fromToday && item.dueAt.isBefore(now) ? now : item.dueAt,
+              )));
+      await _reloadCrm();
+      notifyListeners();
+    }
+  }
+
+  Future<void> completeFollowUp(FollowUp item, {String notes = ''}) async {
+    await _operationalDatabase?.saveFollowUp(item.copyWith(
+      status: FollowUpStatus.completed, completedAt: DateTime.now(), notes: notes,
+    ));
+    await _reloadCrm();
+    if (item.type == FollowUpType.periodic) {
+      final next = FollowUp(
+        id: _uuid.v4(), customerId: item.customerId, saleId: item.saleId,
+        type: FollowUpType.periodic, dueAt: item.dueAt.add(const Duration(days: 15)),
+        createdAt: DateTime.now(),
+      );
+      await _operationalDatabase?.saveFollowUp(next);
+      await _reloadCrm();
+    }
+    notifyListeners();
+  }
+
+  Future<void> archiveCustomer(Customer customer, {bool archived = true}) async {
+    final updated = customer.copyWith(
+      archivedAt: archived ? DateTime.now() : null,
+      clearArchivedAt: !archived,
+      followUpEnabled: archived ? false : customer.followUpEnabled,
+    );
+    await saveCustomer(updated);
+    if (archived) await pauseCustomerFollowUp(updated, reason: 'Cliente archivado');
+  }
+
+  Future<void> revokeCustomerConsent(Customer customer) async {
+    final revoked = customer.copyWith(
+      consentRevokedAt: DateTime.now(), followUpEnabled: false,
+      allowCalls: false, allowWhatsApp: false,
+    );
+    await saveCustomer(revoked);
+    await _cancelCustomerFollowUps(customer.id);
+  }
+
+  Future<void> reactivateCustomerConsent(
+    Customer customer, {
+    bool resumeFollowUp = false,
+  }) async {
+    final reactivated = customer.copyWith(
+      consentAt: DateTime.now(),
+      clearConsentRevocation: true,
+      allowCalls: true,
+      allowWhatsApp: true,
+      followUpEnabled: resumeFollowUp ? true : customer.followUpEnabled,
+    );
+    await saveCustomer(reactivated);
+    if (resumeFollowUp) {
+      await resumeCustomerFollowUp(reactivated, fromToday: true);
+    }
+  }
+
+  Future<void> updateCustomerProfile({
+    required Customer customer,
+    required String name,
+    required String callingCode,
+    required String phoneNumber,
+    required String goal,
+    required DateTime? birthday,
+    required bool consentGranted,
+  }) async {
+    var updated = customer.copyWith(
+      name: name.trim(),
+      callingCode: callingCode.trim(),
+      phoneNumber: phoneNumber.trim(),
+      goal: goal.trim(),
+      birthday: birthday,
+      clearBirthday: birthday == null,
+    );
+    if (consentGranted && !customer.hasActiveConsent) {
+      updated = updated.copyWith(
+        consentAt: DateTime.now(),
+        clearConsentRevocation: true,
+        allowCalls: true,
+        allowWhatsApp: true,
+      );
+      await saveCustomer(updated);
+      return;
+    }
+    if (!consentGranted && customer.hasActiveConsent) {
+      updated = updated.copyWith(
+        consentRevokedAt: DateTime.now(),
+        followUpEnabled: false,
+        allowCalls: false,
+        allowWhatsApp: false,
+      );
+      await saveCustomer(updated);
+      await _cancelCustomerFollowUps(customer.id);
+      return;
+    }
+    await saveCustomer(updated);
+  }
+
+  Future<void> confirmDelivery(Sale sale, {DateTime? deliveredAt}) async {
+    if (sale.customerId == null) throw StateError('Asocia un cliente antes de confirmar la entrega.');
+    final updated = sale.copyWith(
+      deliveryStatus: DeliveryStatus.delivered,
+      deliveredAt: deliveredAt ?? DateTime.now(),
+    );
+    final nextSales = sales.map((item) => item.id == sale.id ? updated : item).toList();
+    await _repository.saveSalesAndInventory(
+      sale.countryCode, inventory, nextSales, recordInventoryMovement: false,
+    );
+    sales = nextSales;
+    await _createDeliveryFollowUps(updated);
+    notifyListeners();
+  }
+
+  Future<void> _createDeliveryFollowUps(Sale sale) async {
+    final db = _operationalDatabase;
+    final deliveredAt = sale.deliveredAt;
+    final customerId = sale.customerId;
+    if (db == null || deliveredAt == null || customerId == null) return;
+    final customer = customers.where((item) => item.id == customerId).firstOrNull;
+    if (customer == null ||
+        customer.isArchived ||
+        !customer.hasActiveConsent ||
+        !customer.followUpEnabled) {
+      await _cancelPendingFollowUpsForSale(sale.id);
+      return;
+    }
+    final existing = followUps.where((item) =>
+        item.saleId == sale.id && item.status != FollowUpStatus.cancelled).toList();
+    if (existing.isNotEmpty) {
+      await _rescheduleSaleFollowUps(sale, existing);
+      return;
+    }
+    DateTime atNine(DateTime day) => DateTime(day.year, day.month, day.day, 9);
+    final now = DateTime.now();
+    final items = <FollowUp>[
+      for (final entry in const [(FollowUpType.dayOne, 1), (FollowUpType.dayThree, 3), (FollowUpType.dayEight, 8), (FollowUpType.periodic, 23)])
+        FollowUp(
+          id: _uuid.v4(), customerId: customerId, saleId: sale.id,
+          type: entry.$1, dueAt: atNine(deliveredAt.add(Duration(days: entry.$2))),
+          createdAt: now,
+        ),
+    ];
+    for (final saleItem in sale.items) {
+      final product = products.where((item) => item.id == saleItem.productId).firstOrNull;
+      if (product == null) continue;
+      final daysPerUnit = await db.configuredDurationDays(
+        product.id, product.countryCode, product.category,
+      );
+      if (daysPerUnit == null) continue;
+      items.add(FollowUp(
+        id: _uuid.v4(), customerId: customerId, saleId: sale.id,
+        productId: saleItem.productId, type: FollowUpType.replenishment,
+        dueAt: atNine(deliveredAt.add(Duration(days: daysPerUnit * saleItem.quantity))),
+        createdAt: now,
+      ));
+    }
+    await db.saveFollowUps(items);
+    await _reloadCrm();
+  }
+
+  Future<void> _cancelPendingFollowUpsForSale(String saleId) async {
+    final pending = followUps.where((item) =>
+        item.saleId == saleId && item.status == FollowUpStatus.pending);
+    await _operationalDatabase?.saveFollowUps(
+      pending.map((item) => item.copyWith(status: FollowUpStatus.cancelled)),
+    );
+    await _reloadCrm();
+  }
+
+  bool _isCustomerEligibleForNewSale(String? customerId) {
+    if (customerId == null) return false;
+    final customer = customers.where((item) => item.id == customerId).firstOrNull;
+    return customer != null &&
+        !customer.isArchived &&
+        customer.hasActiveConsent;
+  }
+
+  Future<void> _cancelCustomerFollowUps(String customerId) async {
+    final cancellable = followUps.where(
+      (item) =>
+          item.customerId == customerId &&
+          (item.status == FollowUpStatus.pending ||
+              item.status == FollowUpStatus.paused),
+    );
+    await _operationalDatabase?.saveFollowUps(
+      cancellable.map(
+        (item) => item.copyWith(status: FollowUpStatus.cancelled),
+      ),
+    );
+    await _reloadCrm();
+    notifyListeners();
+  }
+
+  Future<void> _rescheduleSaleFollowUps(Sale sale, List<FollowUp> existing) async {
+    final deliveredAt = sale.deliveredAt;
+    final db = _operationalDatabase;
+    if (deliveredAt == null || db == null) return;
+    final updated = <FollowUp>[];
+    for (final item in existing.where((entry) => entry.status == FollowUpStatus.pending)) {
+      int? days = switch (item.type) {
+        FollowUpType.dayOne => 1,
+        FollowUpType.dayThree => 3,
+        FollowUpType.dayEight => 8,
+        FollowUpType.periodic => 23,
+        _ => null,
+      };
+      if (item.type == FollowUpType.replenishment && item.productId != null) {
+        final product = products.where((entry) => entry.id == item.productId).firstOrNull;
+        final sold = sale.items.where((entry) => entry.productId == item.productId).firstOrNull;
+        if (product != null && sold != null) {
+          final perUnit = await db.configuredDurationDays(product.id, product.countryCode, product.category);
+          days = perUnit == null ? null : perUnit * sold.quantity;
+        }
+      }
+      if (days != null) {
+        final due = deliveredAt.add(Duration(days: days));
+        updated.add(item.copyWith(dueAt: DateTime(due.year, due.month, due.day, 9)));
+      }
+    }
+    await db.saveFollowUps(updated);
+    await _reloadCrm();
   }
 }
 

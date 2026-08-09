@@ -90,9 +90,20 @@ Configura estos parametros en Remote Config:
 | `ads_banner_home_enabled` | Booleano | `true` | Banner de inicio. |
 | `ads_banner_simulations_enabled` | Booleano | `true` | Banner de simulaciones. |
 | `ads_banner_inventory_enabled` | Booleano | `true` | Banner de inventario. |
-| `ads_banner_sales_enabled` | Booleano | `true` | Banner de registro de ventas. |
+| `ads_banner_sales_enabled` | Booleano | `true` | Banner de ventas e historial. |
+| `ads_banner_customers_enabled` | Booleano | `true` | Banner al final de clientes. |
+| `ads_banner_followups_enabled` | Booleano | `true` | Banner al final de seguimientos de hoy. |
+| `ads_banner_deliveries_enabled` | Booleano | `true` | Banner al final de entregas por confirmar. |
+| `ads_banner_backup_enabled` | Booleano | `true` | Banner de respaldo y sincronizacion. |
+| `ads_banner_settings_enabled` | Booleano | `true` | Banner de configuracion de seguimiento. |
 
 Cada ubicacion tambien acepta un ID propio con el formato `ads_banner_<ubicacion>_unit_id_android` o `ads_banner_<ubicacion>_unit_id_ios`. Por ejemplo: `ads_banner_inventory_unit_id_android`. Si queda vacio, se usa el ID global y luego el ID de prueba/compilacion como respaldo.
+
+Las acciones importantes se cuentan solo cuando terminan correctamente: crear,
+editar, cancelar o eliminar ventas; guardar inventario; registrar clientes;
+completar seguimientos; confirmar entregas; y crear, compartir o importar
+respaldos. Las cancelaciones de formularios y los errores no incrementan el
+contador.
 
 Cuando tengas los IDs reales, ejecuta con variables de entorno:
 
@@ -145,6 +156,71 @@ Los intersticiales se muestran con control de frecuencia remoto:
     comprueba que se indiquen productos requeridos y cantidades disponibles.
 21. Ordenamiento de inventario: valida existencias, A-Z, Z-A, precios, puntos y
     relacion costo por punto tanto en el resumen como en el editor.
+22. Migracion: instala sobre una version con datos Hive y confirma que inventario,
+    ventas y simulaciones conservan cantidades y totales. El archivo Hive permanece
+    intacto y se crea una copia antes de activar SQLite.
+23. Clientes: crea un cliente con indicativo separado, consentimiento, objetivo y
+    cumpleaños; edita, pausa, reactiva, archiva y revoca su consentimiento.
+24. Entrega: registra una venta pendiente, abre Clientes > Entregas y confirma la
+    recepcion. Valida que solo entonces aparezcan seguimientos D+1, D+3 y D+8.
+25. Reposicion: configura dias por producto y confirma que la cantidad multiplique
+    la fecha esperada. Los kits comienzan desactivados.
+26. Seguimiento: abre llamada y WhatsApp, guarda notas y completa una tarea. El
+    seguimiento quincenal debe crear su siguiente tarea a 15 dias.
+27. Respaldo: exporta modulos con contraseña, verifica la vista previa e importa en
+    Combinar y Reemplazar. Una contraseña incorrecta no debe cambiar ningun dato.
+28. Sincronizacion: en el emisor genera el codigo, comparte el archivo por la opcion
+    cercana del sistema y en el receptor usa Recibir datos con el mismo codigo.
+
+## Datos locales, notificaciones y permisos
+
+SQLite se crea en paralelo y se activa solo al terminar una transaccion que valida
+stock, cantidad de ventas, totales y simulaciones. Hive se conserva como espejo de
+compatibilidad durante esta etapa. Firebase sigue limitado al catalogo de productos;
+clientes, ventas, movimientos y seguimientos no se envian a Firestore.
+
+Los respaldos usan GZIP antes de AES-256-GCM. La clave se deriva con Argon2id
+(19 MiB, dos iteraciones) y nunca se escribe dentro del archivo. La importacion crea
+automaticamente un respaldo previo y los movimientos usan UUID para ignorar duplicados.
+
+Despues de generar las carpetas nativas con `flutter create --platforms=android,ios .`,
+agrega a `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+<receiver
+    android:exported="false"
+    android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+<receiver
+    android:exported="false"
+    android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+    <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+    </intent-filter>
+</receiver>
+```
+
+Los dos `receiver` van dentro de `<application>`. Se usan alarmas inexactas, por lo
+que no se solicita el permiso de alarma exacta. En iOS la app solicita permiso de
+notificaciones en el primer arranque y mantiene una ventana movil de 50 recordatorios.
+
+En `android/app/build.gradle.kts`, activa desugaring en `compileOptions` y agrega la
+dependencia requerida por las notificaciones:
+
+```kotlin
+compileOptions {
+    isCoreLibraryDesugaringEnabled = true
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+```
 
 ## Mejoras futuras
 

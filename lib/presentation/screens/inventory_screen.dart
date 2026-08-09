@@ -257,6 +257,16 @@ class _InventoryOverview extends StatelessWidget {
     final sortedInventory = products
         .map((product) => inventoryByProductId[product.id]!)
         .toList();
+    final totalPoints = inventory.fold<int>(
+      0,
+      (sum, item) => sum + item.product.points * item.quantity,
+    );
+    final nutritionPoints = inventory
+        .where((item) => item.product.category == ProductCategory.nutrition)
+        .fold<int>(0, (sum, item) => sum + item.product.points * item.quantity);
+    final beautyPoints = inventory
+        .where((item) => item.product.category == ProductCategory.beauty)
+        .fold<int>(0, (sum, item) => sum + item.product.points * item.quantity);
 
     return SafeArea(
       top: false,
@@ -298,6 +308,11 @@ class _InventoryOverview extends StatelessWidget {
             _InventoryMetric(
               label: 'Valor con 40% dto.',
               value: formatter.money(state.inventoryDiscountedValue40),
+            ),
+            _InventoryMetric(
+              label: 'Puntos disponibles',
+              value: '$totalPoints',
+              subtitle: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
             ),
           ],
         ),
@@ -346,6 +361,11 @@ class _InventoryOverview extends StatelessWidget {
             ),
           ),
         ),
+        const AdaptiveBannerAd(
+          placement: BannerPlacement.inventory,
+          margin: EdgeInsets.only(top: 8, bottom: 4),
+          maxHeight: 72,
+        ),
         ],
       ),
     );
@@ -353,10 +373,15 @@ class _InventoryOverview extends StatelessWidget {
 }
 
 class _InventoryMetric extends StatelessWidget {
-  const _InventoryMetric({required this.label, required this.value});
+  const _InventoryMetric({
+    required this.label,
+    required this.value,
+    this.subtitle,
+  });
 
   final String label;
   final String value;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -379,6 +404,13 @@ class _InventoryMetric extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 3),
+            Text(
+              subtitle!,
+              style: const TextStyle(fontSize: 10, color: AppColors.muted),
+            ),
+          ],
         ],
       ),
     );
@@ -424,6 +456,16 @@ class _SalesDashboard extends StatelessWidget {
       (sum, sale) => sum + sale.effectiveReceivedAmount,
     );
     final points = completed.fold<int>(0, (sum, sale) => sum + sale.totalPoints);
+    final nutritionPoints = completed.fold<int>(0, (sum, sale) {
+      return sum + sale.items
+          .where((item) => item.category == ProductCategory.nutrition)
+          .fold<int>(0, (itemSum, item) => itemSum + item.totalPoints);
+    });
+    final beautyPoints = completed.fold<int>(0, (sum, sale) {
+      return sum + sale.items
+          .where((item) => item.category == ProductCategory.beauty)
+          .fold<int>(0, (itemSum, item) => itemSum + item.totalPoints);
+    });
     final profit = completed.fold<double>(0, (sum, sale) => sum + sale.totalProfit);
     final top = _topProduct(completed);
     final monthLabel = DateFormat('MMMM yyyy', 'es_CO').format(month);
@@ -462,14 +504,15 @@ class _SalesDashboard extends StatelessWidget {
           'Resumen del mes',
           style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 4),
         GridView.count(
+          padding: EdgeInsets.zero,
           crossAxisCount: 2,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 8,
           crossAxisSpacing: 8,
-          childAspectRatio: 1.75,
+          childAspectRatio: 1.65,
           children: [
             _DashboardMetric(
               icon: Icons.shopping_bag_outlined,
@@ -481,6 +524,7 @@ class _SalesDashboard extends StatelessWidget {
               icon: Icons.star_outline,
               label: 'Puntos vendidos',
               value: '$points',
+              subtitle: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
               color: AppColors.orange,
             ),
             _DashboardMetric(
@@ -535,6 +579,11 @@ class _SalesDashboard extends StatelessWidget {
               ),
             ),
           ),
+        const AdaptiveBannerAd(
+          placement: BannerPlacement.sales,
+          margin: EdgeInsets.only(top: 8, bottom: 4),
+          maxHeight: 72,
+        ),
       ],
     );
   }
@@ -577,12 +626,14 @@ class _DashboardMetric extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.subtitle,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -615,6 +666,12 @@ class _DashboardMetric extends StatelessWidget {
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
                   ),
                 ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    maxLines: 2,
+                    style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                  ),
               ],
             ),
           ),

@@ -11,10 +11,31 @@ enum ImportantAdAction {
   countryChanged,
   simulationGenerated,
   simulationShared,
+  backupCreated,
+  backupShared,
+  backupImported,
+  saleRegistered,
+  saleUpdated,
+  saleCancelled,
+  saleDeleted,
+  customerCreated,
+  followUpCompleted,
+  deliveryConfirmed,
+  inventoryUpdated,
   returnedHomeAfterSeveralMinutes,
 }
 
-enum BannerPlacement { home, simulations, inventory, sales }
+enum BannerPlacement {
+  home,
+  simulations,
+  inventory,
+  sales,
+  customers,
+  followups,
+  deliveries,
+  backup,
+  settings,
+}
 
 class AppAdService {
   AppAdService(this._preferences, {FirebaseRemoteConfig? remoteConfig})
@@ -99,6 +120,14 @@ class AppAdService {
   }
 
   Future<void> recordImportantAction(ImportantAdAction action) async {
+    try {
+      await _recordImportantAction(action);
+    } catch (_) {
+      // La publicidad nunca debe bloquear ni invalidar una operación de negocio.
+    }
+  }
+
+  Future<void> _recordImportantAction(ImportantAdAction action) async {
     if (!_isInitialized) return;
 
     final currentCount = _preferences.getInt(_importantActionCountKey) ?? 0;

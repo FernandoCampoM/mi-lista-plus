@@ -23,6 +23,26 @@ class LocalStore {
   final SharedPreferences _preferences;
   final Box<String> _box;
 
+  String? rawOperationalValue(String module, String countryCode) {
+    final prefix = switch (module) {
+      'inventory' => _inventoryPrefix,
+      'sales' => _salesPrefix,
+      'simulations' => _simulationsPrefix,
+      _ => throw ArgumentError.value(module, 'module'),
+    };
+    return _box.get('$prefix$countryCode');
+  }
+
+  List<Sale> salesFromPayload(String payload) {
+    final decoded = jsonDecode(payload) as List<dynamic>;
+    return decoded.map((value) => _saleFromJson(value as Map<String, dynamic>)).toList();
+  }
+
+  List<Simulation> simulationsFromPayload(String payload) {
+    final decoded = jsonDecode(payload) as List<dynamic>;
+    return decoded.map((value) => _simulationFromJson(value as Map<String, dynamic>)).toList();
+  }
+
   Future<void> saveSelectedCountry(String countryCode) {
     return _preferences.setString(_selectedCountryKey, countryCode);
   }
@@ -265,6 +285,9 @@ class LocalStore {
       'status': sale.status.name,
       'receivedAmount': sale.receivedAmount,
       'sourceSimulationId': sale.sourceSimulationId,
+      'customerId': sale.customerId,
+      'deliveryStatus': sale.deliveryStatus.name,
+      'deliveredAt': sale.deliveredAt?.toIso8601String(),
       'items': sale.items.map(_saleItemToJson).toList(),
     };
   }
@@ -282,6 +305,14 @@ class LocalStore {
       ),
       receivedAmount: (json['receivedAmount'] as num?)?.toDouble(),
       sourceSimulationId: json['sourceSimulationId'] as String?,
+      customerId: json['customerId'] as String?,
+      deliveryStatus: DeliveryStatus.values.firstWhere(
+        (status) => status.name == json['deliveryStatus'],
+        orElse: () => DeliveryStatus.pending,
+      ),
+      deliveredAt: json['deliveredAt'] == null
+          ? null
+          : DateTime.tryParse(json['deliveredAt'] as String),
       items: (json['items'] as List<dynamic>)
           .map((value) => _saleItemFromJson(value as Map<String, dynamic>))
           .toList(),
@@ -294,6 +325,7 @@ class LocalStore {
       'productName': item.productName,
       'productCode': item.productCode,
       'imageUrl': item.imageUrl,
+      'category': item.category?.name,
       'quantity': item.quantity,
       'suggestedUnitPrice': item.suggestedUnitPrice,
       'costUnitPrice': item.costUnitPrice,
@@ -309,6 +341,12 @@ class LocalStore {
       productName: json['productName'] as String,
       productCode: json['productCode'] as String? ?? '',
       imageUrl: json['imageUrl'] as String? ?? '',
+      category: json['category'] == null
+          ? null
+          : ProductCategory.values.firstWhere(
+              (category) => category.name == json['category'],
+              orElse: () => ProductCategory.nutrition,
+            ),
       quantity: (json['quantity'] as num).toInt(),
       suggestedUnitPrice: (json['suggestedUnitPrice'] as num).toDouble(),
       costUnitPrice: (json['costUnitPrice'] as num).toDouble(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/inventory_item.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
@@ -10,11 +11,13 @@ class SaleProductPickerScreen extends StatefulWidget {
   const SaleProductPickerScreen({
     required this.inventory,
     this.excludedProductIds = const {},
+    required this.formatter,
     super.key,
   });
 
   final List<InventoryItem> inventory;
   final Set<String> excludedProductIds;
+  final CurrencyFormatter formatter;
 
   @override
   State<SaleProductPickerScreen> createState() =>
@@ -122,6 +125,7 @@ class _SaleProductPickerScreenState
                           item.product.id,
                           value,
                         ),
+                        formatter: widget.formatter,
                       );
                     },
                   ),
@@ -165,11 +169,13 @@ class _PickerProductRow extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.onChanged,
+    required this.formatter,
   });
 
   final InventoryItem item;
   final bool selected;
   final ValueChanged<bool> onChanged;
+  final CurrencyFormatter formatter;
 
   @override
   Widget build(BuildContext context) {
@@ -214,6 +220,11 @@ class _PickerProductRow extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
                       ),
+                    ),
+                    Text(
+                      'Publico ${formatter.money(item.product.suggestedPrice)} · '
+                      '${item.product.points} puntos',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),

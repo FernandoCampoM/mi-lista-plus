@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mi_lista_plus/domain/entities/cart_item.dart';
 import 'package:mi_lista_plus/domain/entities/country.dart';
 import 'package:mi_lista_plus/domain/entities/inventory_item.dart';
+import 'package:mi_lista_plus/domain/entities/inventory_movement.dart';
 import 'package:mi_lista_plus/domain/entities/product.dart';
 import 'package:mi_lista_plus/domain/entities/sale.dart';
 import 'package:mi_lista_plus/domain/entities/simulation.dart';
@@ -321,8 +322,12 @@ class _FakeRepository implements ProductRepository {
   Future<void> saveSalesAndInventory(
     String countryCode,
     List<InventoryItem> inventory,
-    List<Sale> sales,
-  ) async {
+    List<Sale> sales, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+    bool recordInventoryMovement = true,
+  }) async {
     this.inventory = List.of(inventory);
     this.sales = List.of(sales);
   }
@@ -330,8 +335,11 @@ class _FakeRepository implements ProductRepository {
   @override
   Future<void> saveInventory(
     String countryCode,
-    List<InventoryItem> inventory,
-  ) async {
+    List<InventoryItem> inventory, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+  }) async {
     this.inventory = List.of(inventory);
   }
 

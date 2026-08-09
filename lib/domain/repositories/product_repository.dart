@@ -1,5 +1,6 @@
 import '../entities/country.dart';
 import '../entities/inventory_item.dart';
+import '../entities/inventory_movement.dart';
 import '../entities/product.dart';
 import '../entities/sale.dart';
 import '../entities/simulation.dart';
@@ -17,8 +18,11 @@ abstract interface class ProductRepository {
   Future<List<InventoryItem>> loadInventory(String countryCode);
   Future<void> saveInventory(
     String countryCode,
-    List<InventoryItem> inventory,
-  );
+    List<InventoryItem> inventory, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+  });
   Future<List<Sale>> loadSales(String countryCode);
   Future<void> registerSale(
     String countryCode,
@@ -28,6 +32,10 @@ abstract interface class ProductRepository {
   Future<void> saveSalesAndInventory(
     String countryCode,
     List<InventoryItem> inventory,
-    List<Sale> sales,
-  );
+    List<Sale> sales, {
+    InventoryMovementType movementType = InventoryMovementType.manualAdjustment,
+    String? relatedId,
+    String? reason,
+    bool recordInventoryMovement = true,
+  });
 }
