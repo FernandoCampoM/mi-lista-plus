@@ -5,12 +5,16 @@ import '../../core/constants/app_colors.dart';
 import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../core/services/share_simulation_service.dart';
+import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../state/app_scope.dart';
+import '../state/app_state.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
 import 'cart_screen.dart';
+import 'register_sale_screen.dart';
+import 'sale_detail_screen.dart';
 
 class SimulationDetailScreen extends StatelessWidget {
   const SimulationDetailScreen({required this.simulation, super.key});
@@ -21,6 +25,7 @@ class SimulationDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final formatter = CurrencyFormatter(state.selectedCountry!);
+    final convertedSale = state.saleForSimulation(simulation.id);
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -159,8 +164,113 @@ class SimulationDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.all(18),
             child: SafeArea(
               top: false,
-              child: PrimaryButton(label: 'COMPARTIR', onPressed: () => _openShareSheet(context)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PrimaryButton(
+                    label: convertedSale == null
+                        ? 'CONVERTIR EN VENTA'
+                        : 'VER VENTA REGISTRADA',
+                    onPressed: () => _convertToSale(
+                      context,
+                      convertedSale,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  PrimaryButton(
+                    label: 'COMPARTIR',
+                    outlined: true,
+                    onPressed: () => _openShareSheet(context),
+                  ),
+                ],
+              ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _convertToSale(
+    BuildContext context,
+    Sale? existingSale,
+  ) async {
+    if (existingSale != null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SaleDetailScreen(saleId: existingSale.id),
+        ),
+      );
+      return;
+    }
+
+    final state = AppScope.of(context);
+    try {
+      final issues = state.simulationInventoryIssues(simulation);
+      if (issues.isNotEmpty) {
+        await _showInventoryIssues(context, issues);
+        return;
+      }
+
+      final sale = await Navigator.push<Sale>(
+        context,
+        MaterialPageRoute<Sale>(
+          builder: (_) => RegisterSaleScreen(
+            templateSimulation: simulation,
+          ),
+        ),
+      );
+      if (!context.mounted || sale == null) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SaleDetailScreen(saleId: sale.id),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
+  Future<void> _showInventoryIssues(
+    BuildContext context,
+    List<SimulationInventoryIssue> issues,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Inventario insuficiente'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'No es posible convertir la simulacion. Revisa estos productos:',
+              ),
+              const SizedBox(height: 12),
+              ...issues.map(
+                (issue) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '• ${issue.productName}\n'
+                    '  Requeridas: ${issue.requiredQuantity} · '
+                    'Disponibles: ${issue.availableQuantity}',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ENTENDIDO'),
           ),
         ],
       ),

@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/product.dart';
+import '../models/product_sort_option.dart';
 import '../state/app_scope.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
+import '../widgets/product_sort_control.dart';
 
 class InventoryEditorScreen extends StatefulWidget {
   const InventoryEditorScreen({super.key});
@@ -20,6 +22,7 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
   final quantities = <String, int>{};
   final quantityControllers = <String, TextEditingController>{};
   String query = '';
+  ProductSortOption sortOption = ProductSortOption.stock;
   bool initialized = false;
   bool dirty = false;
   bool saving = false;
@@ -57,8 +60,8 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
       return normalized.isEmpty ||
           product.name.toLowerCase().contains(normalized) ||
           product.code.toLowerCase().contains(normalized);
-    }).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    }).toList();
+    sortProducts(products, sortOption, quantities: quantities);
 
     return WillPopScope(
       onWillPop: _confirmDiscard,
@@ -71,25 +74,48 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
                   ? 'Crear inventario'
                   : 'Editar inventario',
               showBack: true,
+              titleFontSize: 20,
+              showCountrySelector: false,
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-              child: TextField(
-                onChanged: (value) => setState(() => query = value),
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Buscar producto...',
-                ),
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
+              child: Column(
+                children: [
+                  TextField(
+                    onChanged: (value) => setState(() => query = value),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Buscar producto...',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ProductSortControl(
+                    value: sortOption,
+                    options: ProductSortOption.values,
+                    defaultOption: ProductSortOption.stock,
+                    onChanged: (value) => setState(
+                      () => sortOption = value ?? ProductSortOption.stock,
+                    ),
+                  ),
+                ],
               ),
             ),
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
                 itemCount: products.length,
+                findChildIndexCallback: (key) {
+                  if (key is! ValueKey<String>) return null;
+                  final index = products.indexWhere(
+                    (product) => product.id == key.value,
+                  );
+                  return index < 0 ? null : index;
+                },
                 itemBuilder: (context, index) {
                   final product = products[index];
                   final quantity = quantities[product.id] ?? 0;
                   return _InventoryProductRow(
+                    key: ValueKey(product.id),
                     product: product,
                     quantityController: quantityControllers[product.id]!,
                     formatter: formatter,
@@ -196,6 +222,7 @@ class _InventoryProductRow extends StatelessWidget {
     required this.onRemove,
     required this.onAdd,
     required this.onQuantityChanged,
+    super.key,
   });
 
   final Product product;
@@ -225,9 +252,13 @@ class _InventoryProductRow extends StatelessWidget {
               children: [
                 Text(
                   product.name,
-                  maxLines: 2,
+                  maxLines: 4,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.15,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 Text('Precio público: ${formatter.money(product.suggestedPrice)}'),
                 Text('Puntos: ${product.points}'),

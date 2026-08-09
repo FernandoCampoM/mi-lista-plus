@@ -42,6 +42,7 @@ class Sale {
     this.number = 0,
     this.status = SaleStatus.completed,
     this.receivedAmount,
+    this.sourceSimulationId,
   });
 
   final String id;
@@ -51,6 +52,7 @@ class Sale {
   final DateTime soldAt;
   final SaleStatus status;
   final double? receivedAmount;
+  final String? sourceSimulationId;
   final List<SaleItem> items;
 
   bool get isCompleted => status == SaleStatus.completed;
@@ -85,6 +87,7 @@ class Sale {
       soldAt: soldAt ?? this.soldAt,
       status: status ?? this.status,
       receivedAmount: receivedAmount ?? this.receivedAmount,
+      sourceSimulationId: sourceSimulationId,
       items: items ?? this.items,
     );
   }

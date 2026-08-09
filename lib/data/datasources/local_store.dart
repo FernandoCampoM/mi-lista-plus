@@ -264,6 +264,7 @@ class LocalStore {
       'soldAt': sale.soldAt.toIso8601String(),
       'status': sale.status.name,
       'receivedAmount': sale.receivedAmount,
+      'sourceSimulationId': sale.sourceSimulationId,
       'items': sale.items.map(_saleItemToJson).toList(),
     };
   }
@@ -280,6 +281,7 @@ class LocalStore {
         orElse: () => SaleStatus.completed,
       ),
       receivedAmount: (json['receivedAmount'] as num?)?.toDouble(),
+      sourceSimulationId: json['sourceSimulationId'] as String?,
       items: (json['items'] as List<dynamic>)
           .map((value) => _saleItemFromJson(value as Map<String, dynamic>))
           .toList(),

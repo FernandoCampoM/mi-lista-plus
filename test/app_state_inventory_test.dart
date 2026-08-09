@@ -168,6 +168,64 @@ void main() {
     expect(state.inventory.single.quantity, 3);
     expect(state.sales, isEmpty);
   });
+
+  test('detecta productos faltantes al convertir una simulacion', () async {
+    final repository = _FakeRepository(
+      products: [firstProduct, secondProduct],
+      inventory: [InventoryItem(product: firstProduct, quantity: 1)],
+    );
+    final state = AppState(repository);
+    await state.bootstrap();
+    final simulation = Simulation(
+      id: 'simulation-stock',
+      countryCode: 'COL',
+      customerName: 'Cliente',
+      discountPercent: 40,
+      createdAt: DateTime(2026, 8, 1),
+      items: [
+        CartItem(product: firstProduct, quantity: 2),
+        CartItem(product: secondProduct, quantity: 1),
+      ],
+    );
+
+    final issues = state.simulationInventoryIssues(simulation);
+
+    expect(issues, hasLength(2));
+    expect(issues.first.availableQuantity, 1);
+    expect(issues.first.requiredQuantity, 2);
+    expect(issues.last.availableQuantity, 0);
+  });
+
+  test('registra una simulacion una sola vez y descuenta inventario', () async {
+    final repository = _FakeRepository(
+      products: [firstProduct],
+      inventory: [InventoryItem(product: firstProduct, quantity: 3)],
+    );
+    final state = AppState(repository);
+    await state.bootstrap();
+
+    final sale = await state.registerSale(
+      customerName: 'Ana',
+      discountPercent: 40,
+      quantities: {firstProduct.id: 2},
+      sourceSimulationId: 'simulation-converted',
+    );
+
+    expect(state.inventory.single.quantity, 1);
+    expect(sale.sourceSimulationId, 'simulation-converted');
+    expect(state.saleForSimulation('simulation-converted')?.id, sale.id);
+
+    await expectLater(
+      state.registerSale(
+        customerName: 'Ana',
+        discountPercent: 40,
+        quantities: {firstProduct.id: 1},
+        sourceSimulationId: 'simulation-converted',
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(state.inventory.single.quantity, 1);
+  });
 }
 
 Product _product(

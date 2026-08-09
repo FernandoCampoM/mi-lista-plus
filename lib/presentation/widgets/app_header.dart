@@ -12,6 +12,7 @@ class AppHeader extends StatelessWidget {
     this.showBack = false,
     this.actions = const [],
     this.titleFontSize = 26,
+    this.showCountrySelector = true,
     super.key,
   });
 
@@ -19,6 +20,7 @@ class AppHeader extends StatelessWidget {
   final bool showBack;
   final List<Widget> actions;
   final double titleFontSize;
+  final bool showCountrySelector;
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +62,7 @@ class AppHeader extends StatelessWidget {
                   ),
             ),
           ),
-          if (state.selectedCountry != null)
+          if (showCountrySelector && state.selectedCountry != null)
             PopupMenuButton<String>(
               tooltip: 'Cambiar pais',
               initialValue: state.selectedCountry!.code,

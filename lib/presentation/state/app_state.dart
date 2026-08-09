@@ -272,6 +272,7 @@ class AppState extends ChangeNotifier {
     required Map<String, int> quantities,
     Set<String> giftProductIds = const {},
     double? receivedAmount,
+    String? sourceSimulationId,
   }) async {
     final country = selectedCountry;
     if (country == null) {
@@ -283,6 +284,10 @@ class AppState extends ChangeNotifier {
         'discountPercent',
         'El descuento debe ser 25, 30, 35 o 40.',
       );
+    }
+    if (sourceSimulationId != null &&
+        saleForSimulation(sourceSimulationId) != null) {
+      throw StateError('Esta simulacion ya fue convertida en venta.');
     }
 
     final result = _buildSaleResult(
@@ -304,6 +309,7 @@ class AppState extends ChangeNotifier {
         receivedAmount,
         result.items,
       ),
+      sourceSimulationId: sourceSimulationId,
       items: result.items,
     );
 
@@ -317,6 +323,53 @@ class AppState extends ChangeNotifier {
     sales = nextSales;
     notifyListeners();
     return sale;
+  }
+
+  Sale? saleForSimulation(String simulationId) {
+    for (final sale in sales) {
+      if (sale.sourceSimulationId == simulationId) return sale;
+    }
+    return null;
+  }
+
+  List<SimulationInventoryIssue> simulationInventoryIssues(
+    Simulation simulation,
+  ) {
+    final country = selectedCountry;
+    if (country == null || country.code != simulation.countryCode) {
+      throw StateError(
+        'La simulacion no pertenece al pais seleccionado actualmente.',
+      );
+    }
+
+    final inventoryByProductId = {
+      for (final item in inventory) item.product.id: item,
+    };
+    final requiredByProductId = <String, int>{};
+    final productNames = <String, String>{};
+    for (final item in simulation.items) {
+      requiredByProductId.update(
+        item.product.id,
+        (quantity) => quantity + item.quantity,
+        ifAbsent: () => item.quantity,
+      );
+      productNames[item.product.id] = item.product.name;
+    }
+    final issues = <SimulationInventoryIssue>[];
+    for (final entry in requiredByProductId.entries) {
+      final available = inventoryByProductId[entry.key]?.quantity ?? 0;
+      if (available < entry.value) {
+        issues.add(
+          SimulationInventoryIssue(
+            productId: entry.key,
+            productName: productNames[entry.key]!,
+            requiredQuantity: entry.value,
+            availableQuantity: available,
+          ),
+        );
+      }
+    }
+    return issues;
   }
 
   int saleNumberOf(Sale sale) {
@@ -587,4 +640,18 @@ class _SaleBuildResult {
 
   final List<SaleItem> items;
   final List<InventoryItem> inventory;
+}
+
+class SimulationInventoryIssue {
+  const SimulationInventoryIssue({
+    required this.productId,
+    required this.productName,
+    required this.requiredQuantity,
+    required this.availableQuantity,
+  });
+
+  final String productId;
+  final String productName;
+  final int requiredQuantity;
+  final int availableQuantity;
 }

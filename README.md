@@ -137,6 +137,14 @@ Los intersticiales se muestran con control de frecuencia remoto:
     seleccionar varios desde el buscador y solo muestra los elegidos.
 17. Edicion de venta: valida que el selector excluya productos ya agregados y
     que permita usar el inventario actual mas las unidades de la venta original.
+18. Dinero recibido: al editar una venta, cambia cantidades, agrega, elimina o
+    marca un obsequio y confirma que el campo se recalcula automaticamente.
+19. Conversion: abre una simulacion con stock suficiente, conviertela en venta
+    y confirma el descuento de inventario y el bloqueo de una segunda conversion.
+20. Inventario insuficiente: intenta convertir una simulacion sin stock y
+    comprueba que se indiquen productos requeridos y cantidades disponibles.
+21. Ordenamiento de inventario: valida existencias, A-Z, Z-A, precios, puntos y
+    relacion costo por punto tanto en el resumen como en el editor.
 
 ## Mejoras futuras
 

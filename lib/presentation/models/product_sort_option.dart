@@ -30,7 +30,7 @@ String productSortLabel(ProductSortOption option) {
     ProductSortOption.higherPrice => 'Mayor precio',
     ProductSortOption.morePoints => 'Mas puntos',
     ProductSortOption.lessPoints => 'Menos puntos',
-    ProductSortOption.bestPointsPerCurrency => 'Mas puntos por $',
+    ProductSortOption.bestPointsPerCurrency => 'Mas puntos por \$',
   };
 }
 

@@ -6,11 +6,13 @@ import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
+import '../models/product_sort_option.dart';
 import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
+import '../widgets/product_sort_control.dart';
 import 'inventory_editor_screen.dart';
 import 'register_sale_screen.dart';
 import 'sale_detail_screen.dart';
@@ -34,6 +36,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   late InventorySection section = widget.initialSection;
   DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   SaleHistoryFilter filter = SaleHistoryFilter.all;
+  ProductSortOption inventorySort = ProductSortOption.stock;
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +76,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 : _InventoryOverview(
                     formatter: formatter,
                     onEdit: _openEditor,
+                    sortOption: inventorySort,
+                    onSortChanged: (value) => setState(
+                      () => inventorySort = value ?? ProductSortOption.stock,
+                    ),
                   ),
           ),
         ],
@@ -197,10 +204,17 @@ class _SectionSelector extends StatelessWidget {
 }
 
 class _InventoryOverview extends StatelessWidget {
-  const _InventoryOverview({required this.formatter, required this.onEdit});
+  const _InventoryOverview({
+    required this.formatter,
+    required this.onEdit,
+    required this.sortOption,
+    required this.onSortChanged,
+  });
 
   final CurrencyFormatter formatter;
   final VoidCallback onEdit;
+  final ProductSortOption sortOption;
+  final ValueChanged<ProductSortOption?> onSortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -230,6 +244,19 @@ class _InventoryOverview extends StatelessWidget {
         ),
       );
     }
+
+    final inventory = [...state.inventory];
+    final quantities = {
+      for (final item in inventory) item.product.id: item.quantity,
+    };
+    final products = inventory.map((item) => item.product).toList();
+    sortProducts(products, sortOption, quantities: quantities);
+    final inventoryByProductId = {
+      for (final item in inventory) item.product.id: item,
+    };
+    final sortedInventory = products
+        .map((product) => inventoryByProductId[product.id]!)
+        .toList();
 
     return SafeArea(
       top: false,
@@ -279,8 +306,15 @@ class _InventoryOverview extends StatelessWidget {
           'Productos en inventario',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
         ),
-        const SizedBox(height: 10),
-        ...state.inventory.map(
+        const SizedBox(height: 4),
+        ProductSortControl(
+          value: sortOption,
+          options: ProductSortOption.values,
+          defaultOption: ProductSortOption.stock,
+          onChanged: onSortChanged,
+        ),
+        const SizedBox(height: 6),
+        ...sortedInventory.map(
           (item) => Container(
             margin: const EdgeInsets.only(bottom: 9),
             padding: const EdgeInsets.all(12),

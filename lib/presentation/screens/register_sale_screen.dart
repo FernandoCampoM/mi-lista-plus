@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Simulation;
 import 'package:flutter/services.dart';
 
 import '../../core/constants/app_colors.dart';
@@ -6,6 +6,7 @@ import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/sale.dart';
+import '../../domain/entities/simulation.dart';
 import '../state/app_scope.dart';
 import '../widgets/app_header.dart';
 import '../widgets/adaptive_banner_ad.dart';
@@ -18,11 +19,18 @@ class RegisterSaleScreen extends StatefulWidget {
   const RegisterSaleScreen({
     this.editingSale,
     this.templateSale,
+    this.templateSimulation,
     super.key,
-  });
+  }) : assert(
+          (editingSale == null ? 0 : 1) +
+                  (templateSale == null ? 0 : 1) +
+                  (templateSimulation == null ? 0 : 1) <=
+              1,
+        );
 
   final Sale? editingSale;
   final Sale? templateSale;
+  final Simulation? templateSimulation;
 
   @override
   State<RegisterSaleScreen> createState() => _RegisterSaleScreenState();
@@ -47,15 +55,16 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       for (final item in state.inventoryAvailableForSale(widget.editingSale))
         item.product.id: item,
     };
-    final source = widget.editingSale ?? widget.templateSale;
-    if (source != null) {
-      customerController.text = source.customerName == 'Cliente'
+    final saleSource = widget.editingSale ?? widget.templateSale;
+    final simulationSource = widget.templateSimulation;
+    if (saleSource != null) {
+      customerController.text = saleSource.customerName == 'Cliente'
           ? ''
-          : source.customerName;
-      if (source.items.isNotEmpty) {
-        discountPercent = source.items.first.discountPercent;
+          : saleSource.customerName;
+      if (saleSource.items.isNotEmpty) {
+        discountPercent = saleSource.items.first.discountPercent;
       }
-      for (final item in source.items) {
+      for (final item in saleSource.items) {
         final available = availableByProductId[item.productId]?.quantity ?? 0;
         final quantity = item.quantity.clamp(0, available).toInt();
         if (quantity > 0) {
@@ -64,11 +73,25 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         }
       }
       if (widget.editingSale != null) {
-        final received = source.effectiveReceivedAmount;
+        final received = saleSource.effectiveReceivedAmount;
         receivedAmountController.text = received % 1 == 0
             ? received.toStringAsFixed(0)
             : received.toStringAsFixed(2);
         receivedAmountWasEdited = true;
+      }
+    } else if (simulationSource != null) {
+      customerController.text = simulationSource.customerName == 'Cliente'
+          ? ''
+          : simulationSource.customerName;
+      if (const [25, 30, 35, 40]
+          .contains(simulationSource.discountPercent)) {
+        discountPercent = simulationSource.discountPercent;
+      }
+      for (final item in simulationSource.items) {
+        final available =
+            availableByProductId[item.product.id]?.quantity ?? 0;
+        final quantity = item.quantity.clamp(0, available).toInt();
+        if (quantity > 0) quantities[item.product.id] = quantity;
       }
     }
     if (!receivedAmountWasEdited) {
@@ -107,8 +130,13 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       body: Column(
         children: [
           AppHeader(
-            title: isEditing ? 'Editar venta' : 'Registrar venta',
+            title: isEditing
+                ? 'Editar venta'
+                : widget.templateSimulation != null
+                    ? 'Convertir en venta'
+                    : 'Registrar venta',
             showBack: true,
+            titleFontSize: 20,
           ),
           const AdaptiveBannerAd(
             placement: BannerPlacement.sales,
@@ -145,6 +173,14 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                     if (value != null) setState(() => discountPercent = value);
                   },
                 ),
+                if (widget.templateSimulation?.discountPercent == 0) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'La simulacion usa precio sugerido. Confirma el descuento '
+                    'de compra que se utilizara para calcular el costo.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 12),
+                  ),
+                ],
                 const SizedBox(height: 18),
                 Row(
                   children: [
@@ -262,7 +298,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     setState(() {
       quantities[item.product.id] = next;
       if (next == 0) giftProductIds.remove(item.product.id);
-      _updateDefaultReceivedAmount();
+      _updateDefaultReceivedAmount(force: true);
     });
   }
 
@@ -273,7 +309,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       } else {
         giftProductIds.remove(item.product.id);
       }
-      _updateDefaultReceivedAmount();
+      _updateDefaultReceivedAmount(force: true);
     });
   }
 
@@ -281,7 +317,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     setState(() {
       quantities.remove(productId);
       giftProductIds.remove(productId);
-      _updateDefaultReceivedAmount();
+      _updateDefaultReceivedAmount(force: true);
     });
   }
 
@@ -307,12 +343,12 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
       for (final productId in addedProductIds) {
         quantities.putIfAbsent(productId, () => 1);
       }
-      _updateDefaultReceivedAmount();
+      _updateDefaultReceivedAmount(force: true);
     });
   }
 
-  void _updateDefaultReceivedAmount() {
-    if (receivedAmountWasEdited) return;
+  void _updateDefaultReceivedAmount({bool force = false}) {
+    if (receivedAmountWasEdited && !force) return;
     final state = AppScope.of(context);
     final availableInventory = state.inventoryAvailableForSale(
       widget.editingSale,
@@ -321,6 +357,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     receivedAmountController.text = total % 1 == 0
         ? total.toStringAsFixed(0)
         : total.toStringAsFixed(2);
+    if (force) receivedAmountWasEdited = false;
   }
 
   double _totalSale(List<InventoryItem> inventory) {
@@ -384,6 +421,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
               quantities: quantities,
               giftProductIds: giftProductIds,
               receivedAmount: _receivedAmount,
+              sourceSimulationId: widget.templateSimulation?.id,
             )
           : await state.updateSale(
               originalSale: original,
