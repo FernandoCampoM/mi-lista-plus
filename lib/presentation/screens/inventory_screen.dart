@@ -11,6 +11,7 @@ import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
 import '../models/product_sort_option.dart';
 import '../state/app_scope.dart';
+import '../state/app_state.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
@@ -39,6 +40,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
   DateTime selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   SaleHistoryFilter filter = SaleHistoryFilter.all;
   ProductSortOption inventorySort = ProductSortOption.stock;
+  final TextEditingController inventorySearchController = TextEditingController();
+  String inventoryQuery = '';
+
+  @override
+  void dispose() {
+    inventorySearchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +91,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     onSortChanged: (value) => setState(
                       () => inventorySort = value ?? ProductSortOption.stock,
                     ),
+                    searchController: inventorySearchController,
+                    searchQuery: inventoryQuery,
+                    onSearchChanged: (value) => setState(() => inventoryQuery = value),
                   ),
           ),
         ],
@@ -267,12 +279,18 @@ class _InventoryOverview extends StatelessWidget {
     required this.onEdit,
     required this.sortOption,
     required this.onSortChanged,
+    required this.searchController,
+    required this.searchQuery,
+    required this.onSearchChanged,
   });
 
   final CurrencyFormatter formatter;
   final VoidCallback onEdit;
   final ProductSortOption sortOption;
   final ValueChanged<ProductSortOption?> onSortChanged;
+  final TextEditingController searchController;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +318,16 @@ class _InventoryOverview extends StatelessWidget {
     }
 
     final inventory = [...state.inventory];
+    final quantities = {
+      for (final item in inventory) item.product.id: item.quantity,
+    };
     final sortedInventory = _sortInventory(inventory, sortOption);
+    final normalizedSearch = searchQuery.trim().toLowerCase();
+    final visibleInventory = sortedInventory.where((item) {
+      if (normalizedSearch.isEmpty) return true;
+      return item.product.name.toLowerCase().contains(normalizedSearch) ||
+          item.product.code.toLowerCase().contains(normalizedSearch);
+    }).toList();
     final totalPoints = inventory.fold<int>(
       0,
       (sum, item) => sum + item.product.points * item.quantity,
@@ -315,10 +342,17 @@ class _InventoryOverview extends StatelessWidget {
     final publicValue = state.inventorySuggestedValue;
     final potentialProfit = publicValue - cost;
     final margin = publicValue <= 0 ? 0.0 : potentialProfit / publicValue * 100;
-    final lowStock = inventory.where((item) => item.quantity > 0 && item.quantity <= 2).length;
-    final noStock = inventory.where((item) => item.quantity <= 0).length;
-    final active = inventory.where((item) => item.quantity > 0).length;
-    final inactive60 = _inactiveProducts60Days(inventory, state.sales);
+    final lowStockItems = inventory.where((item) => item.quantity == 1).toList();
+    final noStockItems = state.products
+        .where((product) => (quantities[product.id] ?? 0) <= 0)
+        .map((product) => InventoryItem(product: product, quantity: 0))
+        .toList();
+    final activeItems = inventory.where((item) => item.quantity > 0).toList();
+    final inactiveItems = _inactiveProducts60Days(activeItems, state.sales);
+    final lowStock = lowStockItems.length;
+    final noStock = noStockItems.length;
+    final active = activeItems.length;
+    final inactive60 = inactiveItems.length;
 
     return SafeArea(
       top: false,
@@ -371,7 +405,12 @@ class _InventoryOverview extends StatelessWidget {
                 iconColor: AppColors.orange,
                 label: 'Por agotarse',
                 value: '$lowStock',
-                footnote: 'Requieren tu atención',
+                footnote: 'Con una sola unidad disponible',
+                onTap: () => _showInventoryProducts(
+                  context,
+                  'Productos por agotarse',
+                  lowStockItems,
+                ),
               ),
             ],
           ),
@@ -386,6 +425,9 @@ class _InventoryOverview extends StatelessWidget {
                 totalPoints: totalPoints,
                 nutritionPoints: nutritionPoints,
                 beautyPoints: beautyPoints,
+                onNoStock: () => _showInventoryProducts(context, 'Productos sin stock', noStockItems),
+                onInactive: () => _showInventoryProducts(context, 'Productos sin movimiento (+60 días)', inactiveItems),
+                onActive: () => _showInventoryProducts(context, 'Productos activos', activeItems),
               );
               final financial = _FinancialSummaryCard(
                 publicValue: publicValue,
@@ -408,17 +450,30 @@ class _InventoryOverview extends StatelessWidget {
             },
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Productos en inventario',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-                ),
-              ),
-              TextButton(onPressed: () {}, child: const Text('Ver todo')),
-            ],
+          const Text(
+            'Productos en inventario',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
           ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: searchController,
+            onChanged: onSearchChanged,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: 'Buscar producto en inventario...',
+              suffixIcon: searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Limpiar búsqueda',
+                      onPressed: () {
+                        searchController.clear();
+                        onSearchChanged('');
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
@@ -450,12 +505,18 @@ class _InventoryOverview extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          ...sortedInventory.map(
-            (item) => _InventoryProductCard(
-              item: item,
-              formatter: formatter,
+          if (visibleInventory.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: Text('No se encontraron productos en tu inventario.')),
+            )
+          else
+            ...visibleInventory.map(
+              (item) => _InventoryProductCard(
+                item: item,
+                formatter: formatter,
+              ),
             ),
-          ),
           const AdaptiveBannerAd(
             placement: BannerPlacement.inventory,
             margin: EdgeInsets.only(top: 8, bottom: 4),
@@ -481,18 +542,69 @@ class _InventoryOverview extends StatelessWidget {
     return products.map((product) => byProductId[product.id]!).toList();
   }
 
-  int _inactiveProducts60Days(List<InventoryItem> items, List<Sale> sales) {
+  List<InventoryItem> _inactiveProducts60Days(List<InventoryItem> items, List<Sale> sales) {
     final cutoff = DateTime.now().subtract(const Duration(days: 60));
-    var count = 0;
+    final result = <InventoryItem>[];
     for (final item in items.where((item) => item.quantity > 0)) {
       DateTime? lastSale;
       for (final sale in sales.where((sale) => sale.isCompleted)) {
         if (!sale.items.any((line) => line.productId == item.product.id)) continue;
         if (lastSale == null || sale.soldAt.isAfter(lastSale)) lastSale = sale.soldAt;
       }
-      if (lastSale == null || lastSale.isBefore(cutoff)) count++;
+      if (lastSale == null || lastSale.isBefore(cutoff)) result.add(item);
     }
-    return count;
+    result.sort((a, b) => a.product.name.toLowerCase().compareTo(b.product.name.toLowerCase()));
+    return result;
+  }
+
+  Future<void> _showInventoryProducts(
+    BuildContext context,
+    String title,
+    List<InventoryItem> items,
+  ) async {
+    final sorted = [...items]
+      ..sort((a, b) => a.product.name.toLowerCase().compareTo(b.product.name.toLowerCase()));
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: .72,
+          minChildSize: .45,
+          maxChildSize: .94,
+          builder: (context, controller) => Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+                    ),
+                    Text('${sorted.length}', style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: sorted.isEmpty
+                    ? const Center(child: Text('No hay productos en esta categoría.'))
+                    : ListView.builder(
+                        controller: controller,
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                        itemCount: sorted.length,
+                        itemBuilder: (context, index) => _InventoryProductCard(
+                          item: sorted[index],
+                          formatter: formatter,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -504,6 +616,9 @@ class _InventoryHealthCard extends StatelessWidget {
     required this.totalPoints,
     required this.nutritionPoints,
     required this.beautyPoints,
+    required this.onNoStock,
+    required this.onInactive,
+    required this.onActive,
   });
 
   final int noStock;
@@ -512,6 +627,9 @@ class _InventoryHealthCard extends StatelessWidget {
   final int totalPoints;
   final int nutritionPoints;
   final int beautyPoints;
+  final VoidCallback onNoStock;
+  final VoidCallback onInactive;
+  final VoidCallback onActive;
 
   @override
   Widget build(BuildContext context) {
@@ -519,21 +637,16 @@ class _InventoryHealthCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Expanded(child: Text('Salud de tu inventario', style: _sectionTitle)),
-              Text('Ver detalle ›', style: TextStyle(fontSize: 11, color: AppColors.muted)),
-            ],
-          ),
+          const Text('Salud de tu inventario', style: _sectionTitle),
           const SizedBox(height: 14),
           _ResponsiveGrid(
             preferredColumns: 4,
             minItemWidth: 105,
             gap: 4,
             children: [
-              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Sin stock', value: '$noStock', color: AppColors.danger),
-              _MiniHealth(icon: Icons.schedule_outlined, label: 'Sin movimiento\n(+60 días)', value: '$inactive60', color: AppColors.orange),
-              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Productos activos', value: '$active', color: AppColors.green),
+              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Sin stock', value: '$noStock', color: AppColors.danger, onTap: onNoStock),
+              _MiniHealth(icon: Icons.schedule_outlined, label: 'Sin movimiento\n(+60 días)', value: '$inactive60', color: AppColors.orange, onTap: onInactive),
+              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Productos activos', value: '$active', color: AppColors.green, onTap: onActive),
               _MiniHealth(
                 icon: Icons.bookmark_added_outlined,
                 label: 'Puntos disponibles',
@@ -556,16 +669,23 @@ class _MiniHealth extends StatelessWidget {
     required this.value,
     required this.color,
     this.subtitle,
+    this.onTap,
   });
   final IconData icon;
   final String label;
   final String value;
   final Color color;
   final String? subtitle;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
       children: [
         Icon(icon, color: AppColors.muted, size: 22),
         const SizedBox(height: 6),
@@ -575,6 +695,8 @@ class _MiniHealth extends StatelessWidget {
         if (subtitle != null)
           Text(subtitle!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 8.5, color: AppColors.muted)),
       ],
+    ),
+      ),
     );
   }
 }
@@ -649,8 +771,8 @@ class _InventoryProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final quantity = item.quantity;
-    final status = quantity <= 0 ? 'Sin stock' : quantity <= 2 ? 'Bajo' : 'Ok';
-    final color = quantity <= 0 ? AppColors.danger : quantity <= 2 ? AppColors.orange : AppColors.green;
+    final status = quantity <= 0 ? 'Sin stock' : quantity >= 3 ? 'Ok' : null;
+    final color = quantity <= 0 ? AppColors.danger : AppColors.green;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(11),
@@ -676,12 +798,14 @@ class _InventoryProductCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(8)),
-            child: Text(status, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
-          ),
+          if (status != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(8)),
+              child: Text(status, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
+            ),
+          ],
         ],
       ),
     );
@@ -737,8 +861,8 @@ class _SalesDashboard extends StatelessWidget {
     final beautyPoints = category[ProductCategory.beauty]!.points;
     final monthLabel = DateFormat('MMMM yyyy', 'es_CO').format(month);
     final topProducts = _topProducts(completed);
-    const pointsGoal = 200;
-    final pointsProgress = math.min(1.0, pointsGoal == 0 ? 0 : points / pointsGoal);
+    final pointsGoal = state.monthlyPointsGoal;
+    final pointsProgress = math.min(1.0, pointsGoal == 0 ? 0.0 : points / pointsGoal).toDouble();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
@@ -816,7 +940,7 @@ class _SalesDashboard extends StatelessWidget {
             _KpiCard(
               icon: Icons.pie_chart_outline,
               iconColor: AppColors.purple,
-              label: 'Ganancia por venta',
+              label: 'Ganancia promedio por venta',
               value: formatter.money(profitPerSale),
               trend: _percentTrend(profitPerSale, previousProfitPerSale),
               trendSuffix: 'vs. ${_monthShort(previousMonth)}',
@@ -827,8 +951,13 @@ class _SalesDashboard extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 650;
-            final progress = _PointsProgressCard(points: points, goal: pointsGoal, progress: pointsProgress);
-            final categoryCard = _CategorySalesCard(category: category, total: totalSales, formatter: formatter);
+            final progress = _PointsProgressCard(
+              points: points,
+              goal: pointsGoal,
+              progress: pointsProgress,
+              onTap: () => _editPointsGoal(context, state),
+            );
+            final categoryCard = _CategorySalesCard(category: category, formatter: formatter);
             if (wide) {
               return Row(children: [Expanded(child: progress), const SizedBox(width: 10), Expanded(child: categoryCard)]);
             }
@@ -873,6 +1002,41 @@ class _SalesDashboard extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  Future<void> _editPointsGoal(BuildContext context, AppState state) async {
+    var draft = '${state.monthlyPointsGoal}';
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Meta mensual de puntos'),
+        content: TextFormField(
+          initialValue: draft,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          onChanged: (value) => draft = value,
+          decoration: const InputDecoration(
+            labelText: 'Meta de puntos',
+            helperText: 'Valor predeterminado: 2500 puntos',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = int.tryParse(draft.trim());
+              if (value == null || value < 1) return;
+              Navigator.pop(dialogContext, value);
+            },
+            child: const Text('GUARDAR'),
+          ),
+        ],
+      ),
+    );
+    if (selected != null) await state.setMonthlyPointsGoal(selected);
   }
 
   List<Sale> _salesForMonth(List<Sale> source, DateTime value) => source
@@ -946,6 +1110,7 @@ class _KpiCard extends StatelessWidget {
     this.footnote,
     this.trendAsPoints = false,
     this.trendAsCount = false,
+    this.onTap,
   });
   final IconData icon;
   final Color iconColor;
@@ -956,6 +1121,7 @@ class _KpiCard extends StatelessWidget {
   final String? footnote;
   final bool trendAsPoints;
   final bool trendAsCount;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -974,7 +1140,10 @@ class _KpiCard extends StatelessWidget {
         trendText = '$sign ${absolute.toStringAsFixed(0)}%';
       }
     }
-    return Container(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
       constraints: const BoxConstraints(minHeight: 116),
       padding: const EdgeInsets.all(12),
       decoration: _cardDecoration(),
@@ -1018,19 +1187,24 @@ class _KpiCard extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 }
 
 class _PointsProgressCard extends StatelessWidget {
-  const _PointsProgressCard({required this.points, required this.goal, required this.progress});
+  const _PointsProgressCard({required this.points, required this.goal, required this.progress, required this.onTap});
   final int points;
   final int goal;
   final double progress;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return _SectionCard(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: _SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1066,22 +1240,26 @@ class _PointsProgressCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text('Meta mensual de puntos', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+          const Text('Meta mensual de puntos · Toca para cambiarla', style: TextStyle(fontSize: 10, color: AppColors.muted)),
         ],
+      ),
       ),
     );
   }
 }
 
 class _CategorySalesCard extends StatelessWidget {
-  const _CategorySalesCard({required this.category, required this.total, required this.formatter});
+  const _CategorySalesCard({required this.category, required this.formatter});
   final Map<ProductCategory, _CategoryMetric> category;
-  final double total;
   final CurrencyFormatter formatter;
 
   @override
   Widget build(BuildContext context) {
-    final values = ProductCategory.values.map((key) => category[key]!.value).toList();
+    final values = [
+      category[ProductCategory.nutrition]!.value,
+      category[ProductCategory.beauty]!.value,
+    ];
+    final categoryTotal = values.fold<double>(0, (sum, value) => sum + value);
     return _SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1099,7 +1277,7 @@ class _CategorySalesCard extends StatelessWidget {
                 child: CustomPaint(
                   painter: _DonutPainter(
                     values: values,
-                    colors: const [AppColors.purple, AppColors.orange, Color(0xFF19B39D)],
+                    colors: const [AppColors.purple, AppColors.orange],
                   ),
                 ),
               ),
@@ -1107,9 +1285,8 @@ class _CategorySalesCard extends StatelessWidget {
               Expanded(
                 child: Column(
                   children: [
-                    _LegendRow(label: 'Nutrición', color: AppColors.purple, value: category[ProductCategory.nutrition]!.value, total: total, formatter: formatter),
-                    _LegendRow(label: 'Belleza', color: AppColors.orange, value: category[ProductCategory.beauty]!.value, total: total, formatter: formatter),
-                    _LegendRow(label: 'Cuidado personal', color: const Color(0xFF19B39D), value: category[ProductCategory.kit]!.value, total: total, formatter: formatter),
+                    _LegendRow(label: 'Nutrición', color: AppColors.purple, value: category[ProductCategory.nutrition]!.value, total: categoryTotal, formatter: formatter),
+                    _LegendRow(label: 'Belleza', color: AppColors.orange, value: category[ProductCategory.beauty]!.value, total: categoryTotal, formatter: formatter),
                   ],
                 ),
               ),

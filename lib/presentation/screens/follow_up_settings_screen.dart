@@ -90,6 +90,39 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _editMonthlyPointsGoal(state.monthlyPointsGoal),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: AppColors.line),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.track_changes_outlined, color: AppColors.purple),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Meta mensual de puntos', style: TextStyle(fontWeight: FontWeight.w900)),
+                          const SizedBox(height: 3),
+                          Text('${state.monthlyPointsGoal} puntos', style: const TextStyle(color: AppColors.muted)),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.edit_outlined, size: 20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.all(14),
@@ -214,6 +247,43 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
         ProductCategory.beauty => 180,
         ProductCategory.kit => 10,
       };
+
+  Future<void> _editMonthlyPointsGoal(int currentGoal) async {
+    var draft = '$currentGoal';
+    final value = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Meta mensual de puntos'),
+        content: TextFormField(
+          initialValue: draft,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          onChanged: (text) => draft = text,
+          decoration: const InputDecoration(
+            labelText: 'Meta de puntos',
+            helperText: 'La meta predeterminada es 2500 puntos.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = int.tryParse(draft.trim());
+              if (parsed == null || parsed < 1) return;
+              Navigator.pop(dialogContext, parsed);
+            },
+            child: const Text('GUARDAR'),
+          ),
+        ],
+      ),
+    );
+    if (value != null && mounted) {
+      await AppScope.of(context).setMonthlyPointsGoal(value);
+    }
+  }
 
   Future<void> _loadDiagnostics() async {
     final service = AppScope.of(context).notificationService;

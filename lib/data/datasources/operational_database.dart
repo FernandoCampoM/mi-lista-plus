@@ -99,9 +99,21 @@ class OperationalDatabase {
 
   Future<int> get reminderHour async => int.tryParse(await _metadata(_database, 'reminder_hour') ?? '') ?? 9;
 
+  Future<int> get monthlyPointsGoal async =>
+      int.tryParse(await _metadata(_database, 'monthly_points_goal') ?? '') ?? 2500;
+
   Future<void> setReminderHour(int hour) async {
     if (hour < 0 || hour > 23) throw ArgumentError.value(hour, 'hour');
     await _database.insert('metadata', {'key': 'reminder_hour', 'value': '$hour'}, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> setMonthlyPointsGoal(int goal) async {
+    if (goal < 1) throw ArgumentError.value(goal, 'goal');
+    await _database.insert(
+      'metadata',
+      {'key': 'monthly_points_goal', 'value': '$goal'},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<int?> configuredDurationDays(String productId, String countryCode, ProductCategory category) async {

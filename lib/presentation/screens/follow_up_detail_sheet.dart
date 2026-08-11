@@ -92,12 +92,23 @@ class _FollowUpDetailState extends State<_FollowUpDetail> {
               leading: Icon(Icons.info_outline, color: AppColors.orange),
               title: Text('La venta historica ya no existe.'),
               subtitle: Text('No se asociara otra venta automaticamente.'),
-            )
-          else ...[
-            Text('Venta #${sale.number.toString().padLeft(4, '0')} · ${DateFormat('dd/MM/yyyy').format(sale.soldAt)}', style: const TextStyle(fontWeight: FontWeight.w800)),
-            Text(sale.deliveredAt == null ? 'Entrega pendiente' : 'Entrega: ${DateFormat('dd/MM/yyyy').format(sale.deliveredAt!)}'),
+            ),
+          if (sale != null) ...[
+            Text(
+              'Venta #${sale.number.toString().padLeft(4, '0')} · ${DateFormat('dd/MM/yyyy').format(sale.soldAt)}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            Text(
+              sale.deliveredAt == null
+                  ? 'Entrega pendiente'
+                  : 'Entrega: ${DateFormat('dd/MM/yyyy').format(sale.deliveredAt!)}',
+            ),
             const SizedBox(height: 8),
-            ...sale.items.map((item) => Text('• ${item.quantity} × ${item.productName}${item.isGift ? ' (obsequio)' : ''}')),
+            ...sale.items.map(
+              (item) => Text(
+                '• ${item.quantity} × ${item.productName}${item.isGift ? ' (obsequio)' : ''}',
+              ),
+            ),
           ],
           if (recentNotes.isNotEmpty) ...[
             const Divider(height: 28),

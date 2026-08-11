@@ -43,6 +43,7 @@ class AppState extends ChangeNotifier {
   String? errorMessage;
   bool isLoading = true;
   int selectedDiscount = 0;
+  int monthlyPointsGoal = 2500;
   HomeTab tab = HomeTab.products;
   Simulation? editingSimulation;
 
@@ -739,6 +740,7 @@ class AppState extends ChangeNotifier {
   Future<void> _reloadCrm() async {
     final db = _operationalDatabase;
     if (db == null) return;
+    monthlyPointsGoal = await db.monthlyPointsGoal;
     customers = await db.loadCustomers(includeArchived: true);
     followUps = await db.loadFollowUps();
     followUpNotes = await db.loadFollowUpNotes();
@@ -777,6 +779,13 @@ class AppState extends ChangeNotifier {
   Future<void> setReminderHour(int hour) async {
     await _operationalDatabase?.setReminderHour(hour);
     await _reloadCrm();
+    notifyListeners();
+  }
+
+  Future<void> setMonthlyPointsGoal(int goal) async {
+    if (goal < 1) throw ArgumentError.value(goal, 'goal');
+    monthlyPointsGoal = goal;
+    await _operationalDatabase?.setMonthlyPointsGoal(goal);
     notifyListeners();
   }
 
