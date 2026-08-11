@@ -1,5 +1,41 @@
 # Mi Lista +
 
+## Seguimientos y notificaciones
+
+- Los recordatorios se calculan en la zona horaria local y usan
+  `America/Bogota` como respaldo cuando Android no informa una zona valida.
+- Android agenda recordatorios inexactos con `inexactAllowWhileIdle`. Esta
+  decision evita solicitar `SCHEDULE_EXACT_ALARM` en Android 14 y es adecuada
+  para seguimientos comerciales que no requieren precision al minuto.
+- Android 13 o posterior solicita permiso de notificaciones despues de mostrar
+  la interfaz. El estado, la cantidad programada, la prueba y el acceso a
+  ajustes estan disponibles en Configurar seguimiento.
+- Los payloads tienen el formato JSON `{"v":1,"followUpId":"..."}` y son
+  compatibles con los identificadores planos de versiones anteriores.
+
+## Remote Config
+
+El aviso de apertura utiliza `startup_notice_enabled`, `startup_notice_id` y
+`startup_notice_image_url`. Solo acepta HTTPS, limita la descarga a 5 MB y la
+imagen a 4096 px por lado, espera un maximo de ocho segundos y registra hasta
+tres presentaciones por campaña e instalacion.
+
+## Verificacion recomendada
+
+Ejecutar `flutter test`, `flutter analyze` y una compilacion `flutter build apk
+--release`. En un dispositivo real verificar permisos aceptados/rechazados,
+reinicio, segundo plano, arranque desde notificacion, red lenta/sin red y
+restricciones de bateria en Xiaomi/Redmi.
+
+El arranque inicial solo abre Hive y preferencias para presentar inmediatamente
+el catalogo almacenado. SQLite, sus migraciones, Firebase, Remote Config, AdMob
+y las notificaciones se inicializan despues de que Home ya esta visible; una
+falla de esos servicios no impide consultar precios sin Internet.
+
+La cadena Android usa Gradle 8.14.3, Android Gradle Plugin 8.11.1 y Kotlin
+2.2.20. Despues de reemplazar una version anterior, ejecutar `flutter clean`,
+`flutter pub get` y `flutter run` para evitar metadatos Gradle en cache.
+
 App Flutter online-first para consultar precios por pais, guardar catalogo local y generar simulaciones con puntos y total en dinero.
 
 ## Tecnologia recomendada
@@ -229,3 +265,12 @@ dependencies {
 - Agregar Firebase Authentication para respaldos multi-dispositivo.
 - Usar Firebase Storage o CDN para imagenes reales de producto.
 - Agregar tests de repositorio, calculo de descuentos y sincronizacion diaria.
+
+## Cambios UI v0.2.5+7
+
+- Dashboard de Ventas renovado con 6 KPI, progreso de puntos, ventas por categoria y Top 3.
+- Dashboard de Inventario renovado con costo, ganancia potencial, salud de inventario y resumen financiero.
+- Banner de Clientes movido a una posicion visible justo debajo de las pestañas Clientes / Hoy / Entregas usando `ads_banner_customers_enabled` y el mismo unit ID existente.
+- Entrar a Respaldo y sincronizacion registra `backupOpened` como accion importante; sigue respetando `ads_interstitial_action_frequency` y `ads_interstitial_cooldown_seconds`.
+- Plantillas de seguimiento centralizadas con emojis funcionales/neutrales y sin corazones o emojis romanticos.
+- Las notificaciones Android usan un icono derivado del logo de la app, adaptado al formato monocromatico requerido por Android, y el logo de la app como icono grande.

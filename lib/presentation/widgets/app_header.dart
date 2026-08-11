@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/app_colors.dart';
@@ -23,6 +24,11 @@ class AppHeader extends StatelessWidget {
   final double titleFontSize;
   final bool showCountrySelector;
   final VoidCallback? onOpenDataTransfer;
+
+  static const _playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.fernandocampo.mi_lista_plus';
+  static const _playStoreMarketUrl =
+      'market://details?id=com.fernandocampo.mi_lista_plus';
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +176,10 @@ class AppHeader extends StatelessWidget {
                       await Future<void>.delayed(
                         const Duration(milliseconds: 220),
                       );
+                      if (!context.mounted) return;
+                      await AppScope.adsOf(context).recordImportantAction(
+                        ImportantAdAction.backupOpened,
+                      );
                       if (context.mounted) onOpenDataTransfer!();
                     },
                     icon: const Icon(Icons.sync_alt),
@@ -177,6 +187,24 @@ class AppHeader extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                 ],
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetContext);
+                    await _shareApplication(context);
+                  },
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Compartir aplicación'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(sheetContext);
+                    await _openPlayStoreRating(context);
+                  },
+                  icon: const Icon(Icons.star_outline),
+                  label: const Text('Valorar y calificar'),
+                ),
+                const SizedBox(height: 10),
                 OutlinedButton.icon(
                   onPressed: () async {
                     Navigator.pop(sheetContext);
@@ -260,5 +288,52 @@ class AppHeader extends StatelessWidget {
     );
     final uri = Uri.parse('https://wa.me/573156837054?text=$text');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _openPlayStoreRating(BuildContext context) async {
+    var openedStore = false;
+    try {
+      openedStore = await launchUrl(
+        Uri.parse(_playStoreMarketUrl),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      openedStore = false;
+    }
+    if (openedStore) return;
+
+    var openedWeb = false;
+    try {
+      openedWeb = await launchUrl(
+        Uri.parse(_playStoreUrl),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      openedWeb = false;
+    }
+    if (!openedWeb && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir Google Play en este dispositivo.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _shareApplication(BuildContext context) async {
+    try {
+      await Share.share(
+        'Descarga Mi Lista + desde Google Play:\n$_playStoreUrl',
+        subject: 'Mi Lista +',
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir el menú para compartir.'),
+          ),
+        );
+      }
+    }
   }
 }

@@ -20,6 +20,9 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
   int? hour;
   String query = '';
   bool loadedHour = false;
+  bool? notificationsAllowed;
+  int? pendingNotifications;
+  String manufacturer = '';
 
   @override
   void didChangeDependencies() {
@@ -29,6 +32,7 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
     AppScope.of(context).reminderHour.then((value) {
       if (mounted) setState(() => hour = value);
     });
+    _loadDiagnostics();
   }
 
   @override
@@ -82,6 +86,36 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
                 await state.setReminderHour(value);
                 if (mounted) setState(() => hour = value);
               },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(8)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Diagnostico de notificaciones', style: TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 6),
+                Text(notificationsAllowed == null
+                    ? 'Comprobando permiso...'
+                    : notificationsAllowed!
+                        ? 'Notificaciones permitidas'
+                        : 'Notificaciones bloqueadas',
+                    style: TextStyle(color: notificationsAllowed == true ? AppColors.green : AppColors.orange)),
+                Text('Programadas: ${pendingNotifications ?? '-'}'),
+                if (manufacturer.contains('xiaomi') || manufacturer.contains('redmi'))
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text('Xiaomi/Redmi puede restringir alarmas en segundo plano. Permite inicio automatico y excluye Mi Lista + del ahorro de bateria.', style: TextStyle(color: AppColors.orange)),
+                  ),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  OutlinedButton.icon(onPressed: _sendTest, icon: const Icon(Icons.notifications_active_outlined), label: const Text('ENVIAR NOTIFICACION DE PRUEBA')),
+                  TextButton.icon(onPressed: _openSettings, icon: const Icon(Icons.settings_outlined), label: const Text('ABRIR AJUSTES')),
+                  IconButton(tooltip: 'Actualizar diagnostico', onPressed: _loadDiagnostics, icon: const Icon(Icons.refresh)),
+                ]),
+              ]),
             ),
           ),
           const Padding(
@@ -180,6 +214,36 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
         ProductCategory.beauty => 180,
         ProductCategory.kit => 10,
       };
+
+  Future<void> _loadDiagnostics() async {
+    final service = AppScope.of(context).notificationService;
+    if (service == null) return;
+    await service.initialize(requestPermission: false);
+    final allowed = await service.notificationsAllowed();
+    final count = await service.pendingCount();
+    final maker = await service.manufacturer();
+    if (mounted) setState(() {
+      notificationsAllowed = allowed;
+      pendingNotifications = count;
+      manufacturer = maker;
+    });
+  }
+
+  Future<void> _sendTest() async {
+    final service = AppScope.of(context).notificationService;
+    if (service == null) return;
+    if (!await service.requestPermissions()) {
+      await _loadDiagnostics();
+      return;
+    }
+    await service.sendTestNotification();
+    await _loadDiagnostics();
+  }
+
+  Future<void> _openSettings() async {
+    await AppScope.of(context).notificationService?.openNotificationSettings();
+    await _loadDiagnostics();
+  }
 
   Future<void> _toggle(
     Product product,

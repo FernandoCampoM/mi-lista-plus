@@ -169,12 +169,33 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<String>(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 68),
+                        child: DropdownButtonFormField<String>(
                         value: dropdownCustomerId,
                         isExpanded: true,
                         itemHeight: null,
-                        decoration: const InputDecoration(labelText: 'Cliente'),
+                        decoration: const InputDecoration(
+                          labelText: 'Cliente',
+                          contentPadding: EdgeInsets.fromLTRB(12, 16, 10, 10),
+                        ),
                         hint: const Text('Seleccionar cliente'),
+                        selectedItemBuilder: (context) => customerOptions
+                            .map((option) => LayoutBuilder(
+                                  builder: (context, constraints) => Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      option.name,
+                                      maxLines: 2,
+                                      softWrap: true,
+                                      style: TextStyle(
+                                        fontSize: constraints.maxWidth < 220 ? 13 : 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ))
+                            .toList(),
                         items: customerOptions
                             .map(
                               (option) => DropdownMenuItem(
@@ -187,21 +208,20 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                                     children: [
                                       Text(
                                         option.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: true,
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                      Text(
-                                        option.statusLabel,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: option.isEligible
-                                              ? AppColors.green
-                                              : AppColors.orange,
-                                        ),
-                                      ),
+                                      Row(children: [
+                                        Icon(_customerStatusIcon(option), size: 14, color: _customerStatusColor(option)),
+                                        const SizedBox(width: 4),
+                                        Flexible(child: Text(
+                                          option.statusLabel,
+                                          softWrap: true,
+                                          style: TextStyle(fontSize: 11, color: _customerStatusColor(option)),
+                                        )),
+                                      ]),
                                     ],
                                   ),
                                 ),
@@ -216,6 +236,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                           customerController.text = option.name;
                         }),
                       ),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     IconButton.filled(
@@ -225,6 +246,17 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                     ),
                   ],
                 ),
+                if (selectedCustomerOption != null) ...[
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    Icon(_customerStatusIcon(selectedCustomerOption), size: 16, color: _customerStatusColor(selectedCustomerOption)),
+                    const SizedBox(width: 5),
+                    Expanded(child: Text(
+                      selectedCustomerOption.statusLabel,
+                      style: TextStyle(color: _customerStatusColor(selectedCustomerOption), fontSize: 12, fontWeight: FontWeight.w700),
+                    )),
+                  ]),
+                ],
                 if (customerWarning != null) ...[
                   const SizedBox(height: 7),
                   Text(
@@ -817,4 +849,22 @@ class _TotalRow extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _customerStatusColor(SaleCustomerOption option) {
+  if (option.isEligible && option.statusLabel.contains('activos')) return AppColors.green;
+  if (option.statusLabel.contains('archivado') ||
+      option.statusLabel.contains('no disponible')) {
+    return AppColors.muted;
+  }
+  return AppColors.orange;
+}
+
+IconData _customerStatusIcon(SaleCustomerOption option) {
+  if (option.isEligible && option.statusLabel.contains('activos')) {
+    return Icons.check_circle_outline;
+  }
+  if (option.statusLabel.contains('archivado')) return Icons.archive_outlined;
+  if (option.statusLabel.contains('no disponible')) return Icons.history;
+  return Icons.info_outline;
 }

@@ -27,7 +27,11 @@ class ProductRepositoryImpl implements ProductRepository {
   final LocalStore _localStore;
   final FirestoreProductRemoteDataSource _remoteDataSource;
   final ConnectivityService _connectivityService;
-  final OperationalDatabase? operationalDatabase;
+  OperationalDatabase? operationalDatabase;
+
+  void attachOperationalDatabase(OperationalDatabase database) {
+    operationalDatabase = database;
+  }
 
   @override
   Future<List<Country>> getCountries() async => supportedCountries;
@@ -58,6 +62,7 @@ class ProductRepositoryImpl implements ProductRepository {
 
   Future<bool> hasProducts(String countryCode) async {
     if (_localStore.loadProducts(countryCode).isNotEmpty) return true;
+    if (!_remoteDataSource.isAvailable) return false;
     if (!await _connectivityService.hasInternet) return false;
 
     final metadata = await _remoteDataSource.fetchCatalogMetadata(countryCode);
@@ -75,6 +80,7 @@ class ProductRepositoryImpl implements ProductRepository {
 
   @override
   Future<void> syncProductsIfNeeded(String countryCode, {bool force = false}) async {
+    if (!_remoteDataSource.isAvailable) return;
     if (!await _connectivityService.hasInternet) return;
 
     final now = DateTime.now();

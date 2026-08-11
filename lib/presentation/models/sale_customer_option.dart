@@ -31,7 +31,7 @@ class SaleCustomerOption {
   }) => SaleCustomerOption(
         id: id,
         name: name.trim().isEmpty ? 'Cliente histórico' : name,
-        statusLabel: 'Cliente no disponible localmente',
+        statusLabel: 'Cliente histórico no disponible localmente',
         isEligible: false,
       );
 

@@ -23,6 +23,7 @@ void main() {
     expect(
       ImportantAdAction.values.map((action) => action.name),
       containsAll(<String>{
+        'backupOpened',
         'backupCreated',
         'backupShared',
         'backupImported',

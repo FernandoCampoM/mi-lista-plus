@@ -11,6 +11,7 @@ enum ImportantAdAction {
   countryChanged,
   simulationGenerated,
   simulationShared,
+  backupOpened,
   backupCreated,
   backupShared,
   backupImported,

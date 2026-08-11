@@ -82,7 +82,7 @@ class EncryptedBackupService {
       final clear = await _aes.decrypt(SecretBox(cipher, nonce: nonce, mac: Mac(mac)), secretKey: key);
       final payload = jsonDecode(utf8.decode(gzip.decode(clear))) as Map<String, dynamic>;
       final counts = <String, int>{};
-      for (final key in const ['inventory', 'snapshots', 'clients', 'followups', 'config']) {
+      for (final key in const ['inventory', 'snapshots', 'clients', 'followups', 'notes', 'config']) {
         if (payload[key] is List) counts[key] = (payload[key] as List).length;
       }
       return BackupPreview(

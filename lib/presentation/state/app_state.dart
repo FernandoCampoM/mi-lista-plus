@@ -7,11 +7,14 @@ import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/inventory_movement.dart';
 import '../../domain/entities/customer.dart';
 import '../../domain/entities/follow_up.dart';
+import '../../domain/entities/follow_up_note.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/simulation.dart';
 import '../../domain/repositories/product_repository.dart';
+import '../../domain/services/follow_up_schedule.dart';
 import '../../data/datasources/operational_database.dart';
+import '../../data/repositories/product_repository_impl.dart';
 import '../../core/services/follow_up_notification_service.dart';
 import '../../core/services/encrypted_backup_service.dart';
 
@@ -23,7 +26,7 @@ class AppState extends ChangeNotifier {
         _notificationService = notificationService;
 
   final ProductRepository _repository;
-  final OperationalDatabase? _operationalDatabase;
+  OperationalDatabase? _operationalDatabase;
   final FollowUpNotificationService? _notificationService;
   final _uuid = const Uuid();
 
@@ -35,6 +38,7 @@ class AppState extends ChangeNotifier {
   List<Sale> sales = const [];
   List<Customer> customers = const [];
   List<FollowUp> followUps = const [];
+  List<FollowUpNote> followUpNotes = const [];
   final Map<String, CartItem> _cart = {};
   String? errorMessage;
   bool isLoading = true;
@@ -737,10 +741,23 @@ class AppState extends ChangeNotifier {
     if (db == null) return;
     customers = await db.loadCustomers(includeArchived: true);
     followUps = await db.loadFollowUps();
+    followUpNotes = await db.loadFollowUpNotes();
     await _notificationService?.reschedule(
       followUps, customers,
       reminderHour: await db.reminderHour,
     );
+  }
+
+  Future<void> attachOperationalDatabase(OperationalDatabase database) async {
+    if (identical(_operationalDatabase, database)) return;
+    _operationalDatabase = database;
+    final repository = _repository;
+    if (repository is ProductRepositoryImpl) {
+      repository.attachOperationalDatabase(database);
+    }
+    await _reloadCrm();
+    await _ensureBirthdayFollowUps();
+    notifyListeners();
   }
 
   EncryptedBackupService get backupService {
@@ -777,20 +794,57 @@ class AppState extends ChangeNotifier {
     final db = _operationalDatabase;
     if (db == null) return;
     final now = DateTime.now();
-    final additions = <FollowUp>[];
+    final changes = <FollowUp>[];
     for (final customer in customers) {
       final birthday = customer.birthday;
-      if (birthday == null || customer.isArchived || !customer.birthdayRemindersEnabled || !customer.hasActiveConsent) continue;
+      final currentPending = followUps.where((item) =>
+          item.customerId == customer.id &&
+          item.type == FollowUpType.birthday &&
+          item.status == FollowUpStatus.pending);
+      if (birthday == null ||
+          customer.isArchived ||
+          !customer.birthdayRemindersEnabled ||
+          !customer.hasActiveConsent) {
+        changes.addAll(currentPending.map(
+          (item) => item.copyWith(status: FollowUpStatus.cancelled),
+        ));
+        continue;
+      }
+      final today = DateTime(now.year, now.month, now.day);
       var due = DateTime(now.year, birthday.month, birthday.day, 9);
-      if (due.isBefore(now)) due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
-      final exists = followUps.any((item) => item.customerId == customer.id && item.type == FollowUpType.birthday && item.dueAt.year == due.year);
-      if (!exists) additions.add(FollowUp(id: _uuid.v4(), customerId: customer.id, type: FollowUpType.birthday, dueAt: due, createdAt: now));
+      if (DateTime(due.year, due.month, due.day).isBefore(today)) {
+        due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
+      }
+      final completedThisYear = followUps.any((item) =>
+          item.customerId == customer.id &&
+          item.type == FollowUpType.birthday &&
+          item.dueAt.year == now.year &&
+          item.status == FollowUpStatus.completed);
+      if (completedThisYear && due.year == now.year) {
+        due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
+      }
+      final pending = currentPending.toList()
+        ..sort((a, b) => a.dueAt.compareTo(b.dueAt));
+      FollowUp? keep;
+      for (final item in pending) {
+        if (item.dueAt.year == due.year && keep == null) {
+          keep = item.dueAt == due ? item : item.copyWith(dueAt: due);
+          if (keep != item) changes.add(keep!);
+        } else {
+          changes.add(item.copyWith(status: FollowUpStatus.cancelled));
+        }
+      }
+      keep ??= FollowUp(
+        id: _uuid.v4(),
+        customerId: customer.id,
+        type: FollowUpType.birthday,
+        dueAt: due,
+        createdAt: now,
+      );
+      if (!followUps.any((item) => item.id == keep!.id)) changes.add(keep!);
     }
-    if (additions.isNotEmpty) {
-      await db.saveFollowUps(additions);
-      customers = await db.loadCustomers(includeArchived: true);
-      followUps = await db.loadFollowUps();
-    }
+    if (changes.isNotEmpty) await db.saveFollowUps(changes);
+    await _reloadCrm();
   }
 
   Future<Customer> saveCustomer(Customer customer) async {
@@ -798,6 +852,7 @@ class AppState extends ChangeNotifier {
     if (db == null) throw StateError('La base local segura no esta disponible.');
     await db.saveCustomer(customer);
     await _reloadCrm();
+    await _ensureBirthdayFollowUps();
     notifyListeners();
     return customer;
   }
@@ -852,11 +907,36 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> completeFollowUp(FollowUp item, {String notes = ''}) async {
+  Future<void> completeFollowUp(
+    FollowUp item, {
+    String notes = '',
+    FollowUpContactMethod contactMethod = FollowUpContactMethod.other,
+  }) async {
+    final db = _operationalDatabase;
+    final completedAt = DateTime.now();
     await _operationalDatabase?.saveFollowUp(item.copyWith(
-      status: FollowUpStatus.completed, completedAt: DateTime.now(), notes: notes,
+      status: FollowUpStatus.completed,
+      completedAt: completedAt,
+      notes: notes.trim(),
     ));
+    if (db != null && notes.trim().isNotEmpty) {
+      await db.saveFollowUpNote(FollowUpNote(
+        id: _uuid.v4(),
+        customerId: item.customerId,
+        followUpId: item.id,
+        saleId: item.saleId,
+        productId: item.productId,
+        followUpType: item.type.name,
+        text: notes.trim(),
+        contactMethod: contactMethod,
+        deviceId: db.deviceId,
+        createdAt: completedAt,
+      ));
+    }
     await _reloadCrm();
+    if (item.type == FollowUpType.birthday) {
+      await _ensureBirthdayFollowUps();
+    }
     if (item.type == FollowUpType.periodic) {
       final next = FollowUp(
         id: _uuid.v4(), customerId: item.customerId, saleId: item.saleId,
@@ -868,6 +948,57 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  Future<void> addManualNote({
+    required String customerId,
+    required String text,
+    String? saleId,
+    String? productId,
+    FollowUpContactMethod contactMethod = FollowUpContactMethod.other,
+  }) async {
+    final db = _operationalDatabase;
+    if (db == null) throw StateError('La base local no esta disponible.');
+    if (text.trim().isEmpty) throw ArgumentError('La nota no puede estar vacia.');
+    await db.saveFollowUpNote(FollowUpNote(
+      id: _uuid.v4(),
+      customerId: customerId,
+      saleId: saleId,
+      productId: productId,
+      text: text.trim(),
+      contactMethod: contactMethod,
+      deviceId: db.deviceId,
+      createdAt: DateTime.now(),
+    ));
+    followUpNotes = await db.loadFollowUpNotes();
+    notifyListeners();
+  }
+
+  Future<void> updateFollowUpNote(
+    FollowUpNote note, {
+    required String text,
+    required FollowUpContactMethod contactMethod,
+  }) async {
+    final db = _operationalDatabase;
+    if (db == null) throw StateError('La base local no esta disponible.');
+    await db.saveFollowUpNote(
+      note.copyWith(text: text.trim(), contactMethod: contactMethod),
+    );
+    followUpNotes = await db.loadFollowUpNotes();
+    notifyListeners();
+  }
+
+  FollowUp? followUpById(String id) =>
+      followUps.where((item) => item.id == id).firstOrNull;
+
+  Customer? customerById(String id) =>
+      customers.where((item) => item.id == id).firstOrNull;
+
+  Sale? saleById(String? id) =>
+      id == null ? null : sales.where((item) => item.id == id).firstOrNull;
+
+  Future<void> rescheduleNotifications() => _reloadCrm();
+
+  FollowUpNotificationService? get notificationService => _notificationService;
 
   Future<void> archiveCustomer(Customer customer, {bool archived = true}) async {
     final updated = customer.copyWith(
@@ -980,13 +1111,13 @@ class AppState extends ChangeNotifier {
       await _rescheduleSaleFollowUps(sale, existing);
       return;
     }
-    DateTime atNine(DateTime day) => DateTime(day.year, day.month, day.day, 9);
     final now = DateTime.now();
+    final schedule = FollowUpSchedule.afterDelivery(deliveredAt);
     final items = <FollowUp>[
-      for (final entry in const [(FollowUpType.dayOne, 1), (FollowUpType.dayThree, 3), (FollowUpType.dayEight, 8), (FollowUpType.periodic, 23)])
+      for (final entry in schedule.entries)
         FollowUp(
           id: _uuid.v4(), customerId: customerId, saleId: sale.id,
-          type: entry.$1, dueAt: atNine(deliveredAt.add(Duration(days: entry.$2))),
+          type: entry.key, dueAt: entry.value,
           createdAt: now,
         ),
     ];
@@ -1000,7 +1131,11 @@ class AppState extends ChangeNotifier {
       items.add(FollowUp(
         id: _uuid.v4(), customerId: customerId, saleId: sale.id,
         productId: saleItem.productId, type: FollowUpType.replenishment,
-        dueAt: atNine(deliveredAt.add(Duration(days: daysPerUnit * saleItem.quantity))),
+        dueAt: FollowUpSchedule.replenishment(
+          deliveredAt,
+          daysPerUnit: daysPerUnit,
+          quantity: saleItem.quantity,
+        ),
         createdAt: now,
       ));
     }

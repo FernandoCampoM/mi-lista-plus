@@ -18,6 +18,7 @@ class FirestoreProductRemoteDataSource {
   FirestoreProductRemoteDataSource(this._firestore);
 
   final FirebaseFirestore? _firestore;
+  bool get isAvailable => _firestore != null;
 
   Future<CatalogMetadata?> fetchCatalogMetadata(String countryCode) async {
     final firestore = _firestore;

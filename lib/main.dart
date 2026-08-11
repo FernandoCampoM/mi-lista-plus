@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -13,137 +16,425 @@ import 'core/constants/app_colors.dart';
 import 'core/services/app_ad_service.dart';
 import 'core/services/connectivity_service.dart';
 import 'core/services/follow_up_notification_service.dart';
+import 'core/services/startup_notice_service.dart';
 import 'data/datasources/firestore_product_remote_data_source.dart';
 import 'data/datasources/local_store.dart';
 import 'data/datasources/operational_database.dart';
 import 'data/repositories/product_repository_impl.dart';
 import 'firebase_options.dart';
-import 'presentation/screens/splash_screen.dart';
 import 'presentation/screens/customers_screen.dart';
+import 'presentation/screens/follow_up_detail_sheet.dart';
+import 'presentation/screens/splash_screen.dart';
 import 'presentation/state/app_scope.dart';
 import 'presentation/state/app_state.dart';
 
 final appNavigatorKey = GlobalKey<NavigatorState>();
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('es_CO');
-  await Hive.initFlutter();
-
-  FirebaseFirestore? firestore;
-  FirebaseRemoteConfig? remoteConfig;
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    firestore = FirebaseFirestore.instance;
-    firestore.settings = const Settings(persistenceEnabled: true);
-    remoteConfig = FirebaseRemoteConfig.instance;
-  } catch (_) {
-    firestore = null;
-    remoteConfig = null;
-  }
-
-  final preferences = await SharedPreferences.getInstance();
-  final adService = AppAdService(preferences, remoteConfig: remoteConfig);
-  await adService.initialize();
-
-  final box = await Hive.openBox<String>(LocalStore.productsBoxName);
-  final localStore = LocalStore(preferences, box);
-  OperationalDatabase? operationalDatabase;
-  try {
-    operationalDatabase = await OperationalDatabase.open(localStore);
-  } catch (error, stackTrace) {
-    // La app continua con Hive si la copia o la validacion SQLite falla.
-    debugPrint('Migracion SQLite omitida: $error\n$stackTrace');
-  }
-  final notificationService = FollowUpNotificationService(
-    onTap: (_) => appNavigatorKey.currentState?.push(
-      MaterialPageRoute<void>(builder: (_) => const CustomersScreen(initialIndex: 1)),
-    ),
-  );
-  try {
-    await notificationService.initialize();
-  } catch (error) {
-    debugPrint('Notificaciones no disponibles: $error');
-  }
-  final repository = ProductRepositoryImpl(
-    localStore: localStore,
-    remoteDataSource: FirestoreProductRemoteDataSource(firestore),
-    connectivityService: ConnectivityService(Connectivity()),
-    operationalDatabase: operationalDatabase,
-  );
-
-  runApp(MiListaPlusApp(
-    state: AppState(
-      repository,
-      operationalDatabase: operationalDatabase,
-      notificationService: notificationService,
-    ),
-    adService: adService,
-  ));
+  runApp(const _BootstrapRoot());
 }
 
-class MiListaPlusApp extends StatelessWidget {
+class _BootstrapRoot extends StatefulWidget {
+  const _BootstrapRoot();
+  @override
+  State<_BootstrapRoot> createState() => _BootstrapRootState();
+}
+
+class _BootstrapRootState extends State<_BootstrapRoot> {
+  Future<_Runtime>? runtime;
+
+  @override
+  void initState() {
+    super.initState();
+    runtime = _createRuntimeWithLimit();
+  }
+
+  void _startRuntime() {
+    setState(() => runtime = _createRuntimeWithLimit());
+  }
+
+  Future<_Runtime> _createRuntimeWithLimit() =>
+      _createRuntime().timeout(const Duration(seconds: 12));
+
+  Future<_Runtime> _createRuntime() async {
+    final total = Stopwatch()..start();
+    unawaited(
+      initializeDateFormatting('es_CO')
+          .timeout(const Duration(seconds: 2))
+          .catchError((_) {}),
+    );
+    final hiveWatch = Stopwatch()..start();
+    await Hive.initFlutter().timeout(const Duration(seconds: 8));
+    final preferencesFuture = SharedPreferences.getInstance()
+        .timeout(const Duration(seconds: 8));
+    final boxFuture = Hive.openBox<String>(LocalStore.productsBoxName)
+        .timeout(const Duration(seconds: 8));
+    final preferences = await preferencesFuture;
+    final box = await boxFuture;
+    _timing('Hive/SharedPreferences', hiveWatch);
+    final localStore = LocalStore(preferences, box);
+    final notificationService = FollowUpNotificationService();
+    final repository = ProductRepositoryImpl(
+      localStore: localStore,
+      remoteDataSource: FirestoreProductRemoteDataSource(null),
+      connectivityService: ConnectivityService(Connectivity()),
+    );
+    final state = AppState(
+      repository,
+      notificationService: notificationService,
+    );
+    _timing('Runtime local listo', total);
+    return _Runtime(
+      state: state,
+      adService: AppAdService(preferences),
+      notificationService: notificationService,
+      preferences: preferences,
+      localStore: localStore,
+      operationalDatabase: null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = runtime;
+    if (pending == null) return const _FirstFrameApp();
+    return FutureBuilder<_Runtime>(
+      future: pending,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _BootstrapFailureApp(
+            error: snapshot.error.toString(),
+            onRetry: _startRuntime,
+          );
+        }
+        if (!snapshot.hasData) return const _FirstFrameApp();
+        final value = snapshot.data!;
+        return MiListaPlusApp(
+          state: value.state,
+          adService: value.adService,
+          notificationService: value.notificationService,
+          preferences: value.preferences,
+          localStore: value.localStore,
+          operationalDatabase: value.operationalDatabase,
+        );
+      },
+    );
+  }
+}
+
+class _BootstrapFailureApp extends StatelessWidget {
+  const _BootstrapFailureApp({required this.error, required this.onRetry});
+
+  final String error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: AppColors.surface,
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.storage_outlined,
+                      size: 48,
+                      color: AppColors.orange,
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'No se pudo abrir el almacenamiento local.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      error,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('REINTENTAR'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
+class _FirstFrameApp extends StatelessWidget {
+  const _FirstFrameApp();
+  @override
+  Widget build(BuildContext context) => const MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: AppColors.surface,
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: AppColors.purple),
+                SizedBox(height: 14),
+                Text('Preparando almacenamiento local...'),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+class MiListaPlusApp extends StatefulWidget {
   const MiListaPlusApp({
     required this.state,
     required this.adService,
+    this.notificationService,
+    this.preferences,
+    this.localStore,
+    this.operationalDatabase,
     super.key,
   });
 
   final AppState state;
   final AppAdService adService;
+  final FollowUpNotificationService? notificationService;
+  final SharedPreferences? preferences;
+  final LocalStore? localStore;
+  final OperationalDatabase? operationalDatabase;
 
   @override
-  Widget build(BuildContext context) {
-    return AppScope(
-      state: state,
-      adService: adService,
-      child: MaterialApp(
-        navigatorKey: appNavigatorKey,
-        debugShowCheckedModeBanner: false,
-        title: 'Mi Lista +',
-        locale: const Locale('es', 'CO'),
-        supportedLocales: const [Locale('es', 'CO')],
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(seedColor: AppColors.purple),
-          scaffoldBackgroundColor: AppColors.surface,
-          textTheme: GoogleFonts.interTextTheme(),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.line),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.line),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.green),
-            ),
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-          outlinedButtonTheme: OutlinedButtonThemeData(
-            style: OutlinedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-        ),
-        home: const SplashScreen(),
-      ),
-    );
+  State<MiListaPlusApp> createState() => _MiListaPlusAppState();
+}
+
+class _MiListaPlusAppState extends State<MiListaPlusApp> {
+  StreamSubscription<String>? payloadSubscription;
+  bool postHomeStarted = false;
+  bool modalOpen = false;
+  String? lastOpenedFollowUpId;
+  final Stopwatch homeWatch = Stopwatch()..start();
+  bool databaseInitializationStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_stateChanged);
+    final firstFrame = Stopwatch()..start();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _timing('Primer frame Flutter', firstFrame);
+      _stateChanged();
+    });
+    final service = widget.notificationService;
+    if (service != null) {
+      payloadSubscription = service.payloads.listen(_openPayload);
+    }
   }
+
+  void _stateChanged() {
+    if (!widget.state.isLoading &&
+        widget.state.selectedCountry != null &&
+        !postHomeStarted) {
+      postHomeStarted = true;
+      _timing('Home con datos locales', homeWatch);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initializeAfterHome());
+    }
+  }
+
+  Future<void> _initializeAfterHome() async {
+    if (!databaseInitializationStarted) {
+      databaseInitializationStarted = true;
+      unawaited(_initializeOperationalDatabase());
+    }
+    final notifications = widget.notificationService;
+    var openedFromNotification = false;
+    if (notifications != null) {
+      final watch = Stopwatch()..start();
+      try {
+        await notifications.initialize();
+        await widget.state.rescheduleNotifications();
+        final launchPayload = notifications.takeLaunchPayload();
+        openedFromNotification = launchPayload != null;
+        if (launchPayload != null) await _openPayload(launchPayload);
+      } catch (error) {
+        developer.log('Notificaciones no disponibles', error: error);
+      }
+      _timing('Notificaciones', watch);
+    }
+    unawaited(widget.adService.initialize());
+    unawaited(_initializeRemote(openedFromNotification: openedFromNotification));
+  }
+
+  Future<void> _initializeOperationalDatabase() async {
+    final localStore = widget.localStore;
+    if (localStore == null) return;
+    final watch = Stopwatch()..start();
+    try {
+      final database = await OperationalDatabase.open(localStore);
+      await widget.state.attachOperationalDatabase(database);
+      _timing('SQLite/migraciones en segundo plano', watch);
+    } catch (error, stackTrace) {
+      developer.log(
+        'SQLite no disponible; el catalogo continua funcionando con Hive.',
+        name: 'mi_lista_plus.storage',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<void> _initializeRemote({required bool openedFromNotification}) async {
+    final preferences = widget.preferences;
+    final localStore = widget.localStore;
+    if (preferences == null || localStore == null) return;
+    final watch = Stopwatch()..start();
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+          .timeout(const Duration(seconds: 6));
+      final firestore = FirebaseFirestore.instance;
+      firestore.settings = const Settings(persistenceEnabled: true);
+      _timing('Firebase', watch);
+      final country = widget.state.selectedCountry;
+      if (country != null) {
+        final remoteRepository = ProductRepositoryImpl(
+          localStore: localStore,
+          remoteDataSource: FirestoreProductRemoteDataSource(firestore),
+          connectivityService: ConnectivityService(Connectivity()),
+          operationalDatabase: widget.operationalDatabase,
+        );
+        unawaited(remoteRepository
+            .syncProductsIfNeeded(country.code)
+            .timeout(const Duration(seconds: 8))
+            .then((_) => widget.state.loadCountry(country, persist: false))
+            .catchError((_) => false));
+      }
+      final noticeService = StartupNoticeService(
+        FirebaseRemoteConfig.instance,
+        preferences,
+      );
+      final notice = await noticeService.load(
+        openedFromFollowUp: openedFromNotification || modalOpen,
+      );
+      if (notice != null && !modalOpen && mounted) {
+        final context = appNavigatorKey.currentContext;
+        if (context == null) return;
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            insetPadding: const EdgeInsets.all(18),
+            child: SafeArea(
+              child: Stack(children: [
+                InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 3,
+                  child: Image.memory(notice.bytes, fit: BoxFit.contain),
+                ),
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: IconButton.filled(
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        );
+        await noticeService.markShown(notice.id);
+      }
+    } catch (error) {
+      developer.log('Servicios remotos omitidos; se usan datos locales.', error: error);
+    }
+  }
+
+  Future<void> _openPayload(String payload) async {
+    final id = FollowUpNotificationService.followUpIdFromPayload(payload);
+    if (id == null || modalOpen || lastOpenedFollowUpId == id) return;
+    final context = appNavigatorKey.currentContext;
+    if (context == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openPayload(payload));
+      return;
+    }
+    final followUp = widget.state.followUpById(id);
+    if (followUp == null) {
+      await appNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+        builder: (_) => const CustomersScreen(initialIndex: 1),
+      ));
+      return;
+    }
+    modalOpen = true;
+    lastOpenedFollowUpId = id;
+    try {
+      await showFollowUpDetail(context, id);
+    } finally {
+      modalOpen = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_stateChanged);
+    payloadSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppScope(
+        state: widget.state,
+        adService: widget.adService,
+        child: MaterialApp(
+          navigatorKey: appNavigatorKey,
+          debugShowCheckedModeBanner: false,
+          title: 'Mi Lista +',
+          locale: const Locale('es', 'CO'),
+          supportedLocales: const [Locale('es', 'CO')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: AppColors.purple),
+            scaffoldBackgroundColor: AppColors.surface,
+            textTheme: GoogleFonts.interTextTheme(),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.line)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.line)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.green)),
+            ),
+          ),
+          home: const SplashScreen(),
+        ),
+      );
+}
+
+class _Runtime {
+  const _Runtime({
+    required this.state,
+    required this.adService,
+    required this.notificationService,
+    required this.preferences,
+    required this.localStore,
+    required this.operationalDatabase,
+  });
+  final AppState state;
+  final AppAdService adService;
+  final FollowUpNotificationService notificationService;
+  final SharedPreferences preferences;
+  final LocalStore localStore;
+  final OperationalDatabase? operationalDatabase;
+}
+
+void _timing(String stage, Stopwatch watch) {
+  watch.stop();
+  developer.log('$stage: ${watch.elapsedMilliseconds} ms', name: 'mi_lista_plus.startup');
 }

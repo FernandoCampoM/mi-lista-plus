@@ -27,7 +27,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
   bool obscurePassword = true;
   static const labels = {
     'inventory': 'Inventario', 'sales': 'Ventas', 'clients': 'Clientes',
-    'followups': 'Seguimientos', 'simulations': 'Simulaciones', 'config': 'Configuracion local',
+    'followups': 'Seguimientos y notas', 'simulations': 'Simulaciones', 'config': 'Configuracion local',
   };
 
   @override void dispose() { password.dispose(); super.dispose(); }

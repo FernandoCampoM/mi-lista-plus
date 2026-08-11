@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
+import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
 import '../models/product_sort_option.dart';
@@ -12,7 +15,6 @@ import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
-import '../widgets/product_sort_control.dart';
 import 'inventory_editor_screen.dart';
 import 'register_sale_screen.dart';
 import 'sale_detail_screen.dart';
@@ -45,7 +47,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final showingSales = section == InventorySection.sales;
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: const Color(0xFFF8F8FA),
       body: Column(
         children: [
           AppHeader(
@@ -60,7 +62,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             placement: showingSales
                 ? BannerPlacement.sales
                 : BannerPlacement.inventory,
-            margin: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+            margin: const EdgeInsets.fromLTRB(18, 8, 18, 4),
             maxHeight: 64,
           ),
           Expanded(
@@ -84,19 +86,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: showingSales
-          ? SafeArea(
-              top: false,
-              child: Container(
-                color: Colors.white,
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
-                child: PrimaryButton(
-                  label: '+ REGISTRAR NUEVA VENTA',
-                  onPressed: state.inventory.isEmpty ? null : _openRegisterSale,
-                ),
-              ),
-            )
-          : null,
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          color: const Color(0xFFF8F8FA),
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+          child: PrimaryButton(
+            label: '+ REGISTRAR NUEVA VENTA',
+            onPressed: state.inventory.isEmpty ? null : _openRegisterSale,
+          ),
+        ),
+      ),
     );
   }
 
@@ -182,22 +182,80 @@ class _SectionSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
-      child: SegmentedButton<InventorySection>(
-        segments: const [
-          ButtonSegment(
-            value: InventorySection.inventory,
-            icon: Icon(Icons.inventory_2_outlined),
-            label: Text('Inventario'),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 360),
+        height: 42,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Row(
+          children: [
+            _SegmentButton(
+              selected: section == InventorySection.inventory,
+              icon: Icons.inventory_2_outlined,
+              label: 'Inventario',
+              onTap: () => onChanged(InventorySection.inventory),
+            ),
+            _SegmentButton(
+              selected: section == InventorySection.sales,
+              icon: Icons.point_of_sale_outlined,
+              label: 'Ventas',
+              onTap: () => onChanged(InventorySection.sales),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentButton extends StatelessWidget {
+  const _SegmentButton({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.purple : Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
           ),
-          ButtonSegment(
-            value: InventorySection.sales,
-            icon: Icon(Icons.point_of_sale_outlined),
-            label: Text('Ventas'),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : AppColors.text,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : AppColors.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ],
           ),
-        ],
-        selected: {section},
-        onSelectionChanged: (values) => onChanged(values.first),
-        showSelectedIcon: false,
+        ),
       ),
     );
   }
@@ -226,11 +284,7 @@ class _InventoryOverview extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.inventory_2_outlined,
-                size: 64,
-                color: AppColors.purple,
-              ),
+              const Icon(Icons.inventory_2_outlined, size: 64, color: AppColors.purple),
               const SizedBox(height: 16),
               const Text(
                 'Aún no tienes productos en tu inventario.',
@@ -246,17 +300,7 @@ class _InventoryOverview extends StatelessWidget {
     }
 
     final inventory = [...state.inventory];
-    final quantities = {
-      for (final item in inventory) item.product.id: item.quantity,
-    };
-    final products = inventory.map((item) => item.product).toList();
-    sortProducts(products, sortOption, quantities: quantities);
-    final inventoryByProductId = {
-      for (final item in inventory) item.product.id: item,
-    };
-    final sortedInventory = products
-        .map((product) => inventoryByProductId[product.id]!)
-        .toList();
+    final sortedInventory = _sortInventory(inventory, sortOption);
     final totalPoints = inventory.fold<int>(
       0,
       (sum, item) => sum + item.product.points * item.quantity,
@@ -267,150 +311,377 @@ class _InventoryOverview extends StatelessWidget {
     final beautyPoints = inventory
         .where((item) => item.product.category == ProductCategory.beauty)
         .fold<int>(0, (sum, item) => sum + item.product.points * item.quantity);
+    final cost = state.inventoryDiscountedValue40;
+    final publicValue = state.inventorySuggestedValue;
+    final potentialProfit = publicValue - cost;
+    final margin = publicValue <= 0 ? 0.0 : potentialProfit / publicValue * 100;
+    final lowStock = inventory.where((item) => item.quantity > 0 && item.quantity <= 2).length;
+    final noStock = inventory.where((item) => item.quantity <= 0).length;
+    final active = inventory.where((item) => item.quantity > 0).length;
+    final inactive60 = _inactiveProducts60Days(inventory, state.sales);
 
     return SafeArea(
       top: false,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
         children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Resumen del inventario',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-              ),
-            ),
-            IconButton.outlined(
-              tooltip: 'Editar inventario',
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _InventoryMetric(
-              label: 'Productos diferentes',
-              value: '${state.inventory.length}',
-            ),
-            _InventoryMetric(
-              label: 'Unidades disponibles',
-              value: '${state.inventoryUnits}',
-            ),
-            _InventoryMetric(
-              label: 'Valor precio público',
-              value: formatter.money(state.inventorySuggestedValue),
-            ),
-            _InventoryMetric(
-              label: 'Valor con 40% dto.',
-              value: formatter.money(state.inventoryDiscountedValue40),
-            ),
-            _InventoryMetric(
-              label: 'Puntos disponibles',
-              value: '$totalPoints',
-              subtitle: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
-            ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        const Text(
-          'Productos en inventario',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 4),
-        ProductSortControl(
-          value: sortOption,
-          options: ProductSortOption.values,
-          defaultOption: ProductSortOption.stock,
-          onChanged: onSortChanged,
-        ),
-        const SizedBox(height: 6),
-        ...sortedInventory.map(
-          (item) => Container(
-            margin: const EdgeInsets.only(bottom: 9),
-            padding: const EdgeInsets.all(12),
-            decoration: _cardDecoration(),
-            child: Row(
-              children: [
-                ProductAvatar(product: item.product, size: 52),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.product.name,
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      Text('${item.quantity} unidades disponibles'),
-                      Text(
-                        'Valor ${formatter.money(item.suggestedValue)} · '
-                        '${item.product.points * item.quantity} pts',
-                      ),
-                      Text(
-                        'Ganancia potencial ${formatter.money(item.profit40)}',
-                      ),
-                    ],
-                  ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Resumen del inventario',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
                 ),
-              ],
+              ),
+              IconButton.outlined(
+                tooltip: 'Editar inventario',
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _ResponsiveGrid(
+            preferredColumns: 4,
+            minItemWidth: 150,
+            children: [
+              _KpiCard(
+                icon: Icons.monetization_on_outlined,
+                iconColor: AppColors.purple,
+                label: 'Valor invertido (costo)',
+                value: formatter.money(cost),
+                footnote: 'Invertido en tu inventario',
+              ),
+              _KpiCard(
+                icon: Icons.trending_up,
+                iconColor: AppColors.green,
+                label: 'Ganancia potencial',
+                value: formatter.money(potentialProfit),
+                footnote: 'Si vendes a precio público',
+              ),
+              _KpiCard(
+                icon: Icons.sell_outlined,
+                iconColor: const Color(0xFF397CE8),
+                label: 'Unidades disponibles',
+                value: '${state.inventoryUnits}',
+                footnote: 'En $active productos diferentes',
+              ),
+              _KpiCard(
+                icon: Icons.warning_amber_rounded,
+                iconColor: AppColors.orange,
+                label: 'Por agotarse',
+                value: '$lowStock',
+                footnote: 'Requieren tu atención',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 700;
+              final health = _InventoryHealthCard(
+                noStock: noStock,
+                inactive60: inactive60,
+                active: active,
+                totalPoints: totalPoints,
+                nutritionPoints: nutritionPoints,
+                beautyPoints: beautyPoints,
+              );
+              final financial = _FinancialSummaryCard(
+                publicValue: publicValue,
+                cost: cost,
+                potentialProfit: potentialProfit,
+                margin: margin,
+                formatter: formatter,
+              );
+              if (wide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: health),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 2, child: financial),
+                  ],
+                );
+              }
+              return Column(children: [health, const SizedBox(height: 10), financial]);
+            },
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Productos en inventario',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                ),
+              ),
+              TextButton(onPressed: () {}, child: const Text('Ver todo')),
+            ],
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<ProductSortOption>(
+                  value: sortOption,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Ordenar por',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  items: ProductSortOption.values
+                      .map((item) => DropdownMenuItem(
+                            value: item,
+                            child: Text(
+                              item == ProductSortOption.stock
+                                  ? 'Existencias (mayor a menor)'
+                                  : productSortLabel(item),
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: onSortChanged,
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => onSortChanged(ProductSortOption.stock),
+                child: const Text('Limpiar'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...sortedInventory.map(
+            (item) => _InventoryProductCard(
+              item: item,
+              formatter: formatter,
             ),
           ),
-        ),
-        const AdaptiveBannerAd(
-          placement: BannerPlacement.inventory,
-          margin: EdgeInsets.only(top: 8, bottom: 4),
-          maxHeight: 72,
-        ),
+          const AdaptiveBannerAd(
+            placement: BannerPlacement.inventory,
+            margin: EdgeInsets.only(top: 8, bottom: 4),
+            maxHeight: 72,
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<InventoryItem> _sortInventory(
+    List<InventoryItem> inventory,
+    ProductSortOption option,
+  ) {
+    final quantities = {
+      for (final item in inventory) item.product.id: item.quantity,
+    };
+    final products = inventory.map((item) => item.product).toList();
+    sortProducts(products, option, quantities: quantities);
+    final byProductId = {
+      for (final item in inventory) item.product.id: item,
+    };
+    return products.map((product) => byProductId[product.id]!).toList();
+  }
+
+  int _inactiveProducts60Days(List<InventoryItem> items, List<Sale> sales) {
+    final cutoff = DateTime.now().subtract(const Duration(days: 60));
+    var count = 0;
+    for (final item in items.where((item) => item.quantity > 0)) {
+      DateTime? lastSale;
+      for (final sale in sales.where((sale) => sale.isCompleted)) {
+        if (!sale.items.any((line) => line.productId == item.product.id)) continue;
+        if (lastSale == null || sale.soldAt.isAfter(lastSale)) lastSale = sale.soldAt;
+      }
+      if (lastSale == null || lastSale.isBefore(cutoff)) count++;
+    }
+    return count;
+  }
+}
+
+class _InventoryHealthCard extends StatelessWidget {
+  const _InventoryHealthCard({
+    required this.noStock,
+    required this.inactive60,
+    required this.active,
+    required this.totalPoints,
+    required this.nutritionPoints,
+    required this.beautyPoints,
+  });
+
+  final int noStock;
+  final int inactive60;
+  final int active;
+  final int totalPoints;
+  final int nutritionPoints;
+  final int beautyPoints;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Expanded(child: Text('Salud de tu inventario', style: _sectionTitle)),
+              Text('Ver detalle ›', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ResponsiveGrid(
+            preferredColumns: 4,
+            minItemWidth: 105,
+            gap: 4,
+            children: [
+              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Sin stock', value: '$noStock', color: AppColors.danger),
+              _MiniHealth(icon: Icons.schedule_outlined, label: 'Sin movimiento\n(+60 días)', value: '$inactive60', color: AppColors.orange),
+              _MiniHealth(icon: Icons.inventory_2_outlined, label: 'Productos activos', value: '$active', color: AppColors.green),
+              _MiniHealth(
+                icon: Icons.bookmark_added_outlined,
+                label: 'Puntos disponibles',
+                value: '$totalPoints',
+                color: AppColors.purple,
+                subtitle: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _InventoryMetric extends StatelessWidget {
-  const _InventoryMetric({
+class _MiniHealth extends StatelessWidget {
+  const _MiniHealth({
+    required this.icon,
     required this.label,
     required this.value,
+    required this.color,
     this.subtitle,
   });
-
+  final IconData icon;
   final String label;
   final String value;
+  final Color color;
   final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
-    final width = (MediaQuery.sizeOf(context).width - 44) / 2;
-    return Container(
-      width: width,
-      constraints: const BoxConstraints(minHeight: 82),
-      padding: const EdgeInsets.all(12),
-      decoration: _cardDecoration(),
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.muted, size: 22),
+        const SizedBox(height: 6),
+        Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: color)),
+        if (subtitle != null)
+          Text(subtitle!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 8.5, color: AppColors.muted)),
+      ],
+    );
+  }
+}
+
+class _FinancialSummaryCard extends StatelessWidget {
+  const _FinancialSummaryCard({
+    required this.publicValue,
+    required this.cost,
+    required this.potentialProfit,
+    required this.margin,
+    required this.formatter,
+  });
+  final double publicValue;
+  final double cost;
+  final double potentialProfit;
+  final double margin;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.purple,
-              fontSize: 17,
-              fontWeight: FontWeight.w900,
+          const Text('Resumen financiero', style: _sectionTitle),
+          const SizedBox(height: 12),
+          _FinancialRow(label: 'Valor a precio público', value: formatter.money(publicValue)),
+          _FinancialRow(label: 'Valor con 40% dto.', value: formatter.money(cost)),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+            decoration: BoxDecoration(color: const Color(0xFFEAF9F4), borderRadius: BorderRadius.circular(8)),
+            child: _FinancialRow(
+              label: 'Ganancia potencial total',
+              value: formatter.money(potentialProfit),
+              valueColor: const Color(0xFF16845D),
+              bold: true,
             ),
           ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 3),
-            Text(
-              subtitle!,
-              style: const TextStyle(fontSize: 10, color: AppColors.muted),
+          _FinancialRow(label: 'Margen potencial', value: '${margin.toStringAsFixed(1)}%', bold: true),
+        ],
+      ),
+    );
+  }
+}
+
+class _FinancialRow extends StatelessWidget {
+  const _FinancialRow({required this.label, required this.value, this.valueColor, this.bold = false});
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool bold;
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted))),
+          Text(value, style: TextStyle(fontSize: 12, fontWeight: bold ? FontWeight.w900 : FontWeight.w700, color: valueColor ?? AppColors.text)),
+        ],
+      ),
+    );
+  }
+}
+
+class _InventoryProductCard extends StatelessWidget {
+  const _InventoryProductCard({required this.item, required this.formatter});
+  final InventoryItem item;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final quantity = item.quantity;
+    final status = quantity <= 0 ? 'Sin stock' : quantity <= 2 ? 'Bajo' : 'Ok';
+    final color = quantity <= 0 ? AppColors.danger : quantity <= 2 ? AppColors.orange : AppColors.green;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(11),
+      decoration: _cardDecoration(),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.purple, width: 1.4)),
+            child: ProductAvatar(product: item.product, size: 48),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.product.name, maxLines: 4, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, height: 1.15)),
+                const SizedBox(height: 3),
+                Text('$quantity unidades disponibles · ${item.product.points * quantity} pts', style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                Text('Valor ${formatter.money(item.suggestedValue)} · Costo ${formatter.money(item.discountedValue40)}', style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                Text('Ganancia potencial ${formatter.money(item.profit40)}', style: const TextStyle(fontSize: 10.5, color: Color(0xFF14875D), fontWeight: FontWeight.w800)),
+              ],
             ),
-          ],
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(8)),
+            child: Text(status, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
+          ),
         ],
       ),
     );
@@ -437,12 +708,9 @@ class _SalesDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final monthSales = state.sales
-        .where(
-          (sale) => sale.soldAt.year == month.year && sale.soldAt.month == month.month,
-        )
-        .toList()
-      ..sort((a, b) => b.soldAt.compareTo(a.soldAt));
+    final monthSales = _salesForMonth(state.sales, month);
+    final previousMonth = DateTime(month.year, month.month - 1);
+    final previousSales = _salesForMonth(state.sales, previousMonth).where((sale) => sale.isCompleted).toList();
     final completed = monthSales.where((sale) => sale.isCompleted).toList();
     final visible = monthSales.where((sale) {
       return switch (filter) {
@@ -451,30 +719,32 @@ class _SalesDashboard extends StatelessWidget {
         SaleHistoryFilter.cancelled => !sale.isCompleted,
       };
     }).toList();
-    final totalSales = completed.fold<double>(
-      0,
-      (sum, sale) => sum + sale.effectiveReceivedAmount,
-    );
-    final points = completed.fold<int>(0, (sum, sale) => sum + sale.totalPoints);
-    final nutritionPoints = completed.fold<int>(0, (sum, sale) {
-      return sum + sale.items
-          .where((item) => item.category == ProductCategory.nutrition)
-          .fold<int>(0, (itemSum, item) => itemSum + item.totalPoints);
-    });
-    final beautyPoints = completed.fold<int>(0, (sum, sale) {
-      return sum + sale.items
-          .where((item) => item.category == ProductCategory.beauty)
-          .fold<int>(0, (itemSum, item) => itemSum + item.totalPoints);
-    });
+
+    final totalSales = _sumReceived(completed);
+    final previousTotal = _sumReceived(previousSales);
     final profit = completed.fold<double>(0, (sum, sale) => sum + sale.totalProfit);
-    final top = _topProduct(completed);
+    final previousProfit = previousSales.fold<double>(0, (sum, sale) => sum + sale.totalProfit);
+    final points = completed.fold<int>(0, (sum, sale) => sum + sale.totalPoints);
+    final previousPoints = previousSales.fold<int>(0, (sum, sale) => sum + sale.totalPoints);
+    final units = completed.fold<int>(0, (sum, sale) => sum + sale.totalUnits);
+    final ticket = completed.isEmpty ? 0.0 : totalSales / completed.length;
+    final previousTicket = previousSales.isEmpty ? 0.0 : previousTotal / previousSales.length;
+    final profitPerSale = completed.isEmpty ? 0.0 : profit / completed.length;
+    final previousProfitPerSale = previousSales.isEmpty ? 0.0 : previousProfit / previousSales.length;
+    final margin = totalSales <= 0 ? 0.0 : profit / totalSales * 100;
+    final category = _categoryTotals(completed);
+    final nutritionPoints = category[ProductCategory.nutrition]!.points;
+    final beautyPoints = category[ProductCategory.beauty]!.points;
     final monthLabel = DateFormat('MMMM yyyy', 'es_CO').format(month);
+    final topProducts = _topProducts(completed);
+    const pointsGoal = 200;
+    final pointsProgress = math.min(1.0, pointsGoal == 0 ? 0 : points / pointsGoal);
 
     return ListView(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: _cardDecoration(),
           child: Row(
             children: [
@@ -486,80 +756,99 @@ class _SalesDashboard extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
               ),
-              IconButton(
-                tooltip: 'Mes anterior',
-                onPressed: onPreviousMonth,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              IconButton(
-                tooltip: 'Mes siguiente',
-                onPressed: onNextMonth,
-                icon: const Icon(Icons.chevron_right),
-              ),
+              IconButton(onPressed: onPreviousMonth, icon: const Icon(Icons.chevron_left)),
+              IconButton(onPressed: onNextMonth, icon: const Icon(Icons.chevron_right)),
             ],
           ),
         ),
-        const SizedBox(height: 18),
-        const Text(
-          'Resumen del mes',
-          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 4),
-        GridView.count(
-          padding: EdgeInsets.zero,
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1.65,
+        const SizedBox(height: 12),
+        const Text('Resumen del mes', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 6),
+        _ResponsiveGrid(
+          preferredColumns: 3,
+          minItemWidth: 155,
           children: [
-            _DashboardMetric(
+            _KpiCard(
               icon: Icons.shopping_bag_outlined,
+              iconColor: AppColors.purple,
               label: 'Ventas totales',
               value: formatter.money(totalSales),
-              color: AppColors.purple,
+              trend: _percentTrend(totalSales, previousTotal),
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
             ),
-            _DashboardMetric(
-              icon: Icons.star_outline,
-              label: 'Puntos vendidos',
-              value: '$points',
-              subtitle: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
-              color: AppColors.orange,
-            ),
-            _DashboardMetric(
+            _KpiCard(
               icon: Icons.trending_up,
+              iconColor: AppColors.green,
               label: 'Ganancia total',
               value: formatter.money(profit),
-              color: AppColors.green,
+              trend: _percentTrend(profit, previousProfit),
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
+              footnote: 'Margen: ${margin.toStringAsFixed(1)}%',
             ),
-            _DashboardMetric(
+            _KpiCard(
+              icon: Icons.star_outline,
+              iconColor: AppColors.orange,
+              label: 'Puntos vendidos',
+              value: '$points',
+              trend: points - previousPoints,
+              trendAsPoints: true,
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
+              footnote: 'Nutrición: $nutritionPoints · Belleza: $beautyPoints',
+            ),
+            _KpiCard(
               icon: Icons.receipt_long_outlined,
-              label: 'Ventas realizadas',
+              iconColor: const Color(0xFF6057E8),
+              label: 'Número de ventas',
               value: '${completed.length}',
-              color: const Color(0xFF6A5ACD),
+              trend: completed.length - previousSales.length,
+              trendAsCount: true,
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
+              footnote: 'Unidades vendidas: $units',
+            ),
+            _KpiCard(
+              icon: Icons.payments_outlined,
+              iconColor: const Color(0xFF23A55A),
+              label: 'Ticket promedio',
+              value: formatter.money(ticket),
+              trend: _percentTrend(ticket, previousTicket),
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
+            ),
+            _KpiCard(
+              icon: Icons.pie_chart_outline,
+              iconColor: AppColors.purple,
+              label: 'Ganancia por venta',
+              value: formatter.money(profitPerSale),
+              trend: _percentTrend(profitPerSale, previousProfitPerSale),
+              trendSuffix: 'vs. ${_monthShort(previousMonth)}',
             ),
           ],
         ),
         const SizedBox(height: 10),
-        _TopProductCard(top: top),
-        const SizedBox(height: 24),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 650;
+            final progress = _PointsProgressCard(points: points, goal: pointsGoal, progress: pointsProgress);
+            final categoryCard = _CategorySalesCard(category: category, total: totalSales, formatter: formatter);
+            if (wide) {
+              return Row(children: [Expanded(child: progress), const SizedBox(width: 10), Expanded(child: categoryCard)]);
+            }
+            return Column(children: [progress, const SizedBox(height: 10), categoryCard]);
+          },
+        ),
+        const SizedBox(height: 10),
+        _TopThreeProductsCard(products: topProducts, totalSales: totalSales, formatter: formatter),
+        const SizedBox(height: 22),
         Row(
           children: [
-            const Expanded(
-              child: Text(
-                'Historial de ventas',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
-              ),
-            ),
+            const Expanded(child: Text('Historial de ventas', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900))),
             OutlinedButton.icon(
               onPressed: onFilter,
-              icon: const Icon(Icons.filter_alt_outlined, size: 18),
+              icon: const Icon(Icons.filter_alt_outlined, size: 17),
               label: Text(_filterLabel(filter)),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         if (visible.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 28),
@@ -573,9 +862,7 @@ class _SalesDashboard extends StatelessWidget {
               formatter: formatter,
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute<void>(
-                  builder: (_) => SaleDetailScreen(saleId: sale.id),
-                ),
+                MaterialPageRoute<void>(builder: (_) => SaleDetailScreen(saleId: sale.id)),
               ),
             ),
           ),
@@ -588,15 +875,38 @@ class _SalesDashboard extends StatelessWidget {
     );
   }
 
-  String _filterLabel(SaleHistoryFilter value) {
-    return switch (value) {
-      SaleHistoryFilter.all => 'Todas',
-      SaleHistoryFilter.completed => 'Completadas',
-      SaleHistoryFilter.cancelled => 'Canceladas',
-    };
+  List<Sale> _salesForMonth(List<Sale> source, DateTime value) => source
+      .where((sale) => sale.soldAt.year == value.year && sale.soldAt.month == value.month)
+      .toList()
+    ..sort((a, b) => b.soldAt.compareTo(a.soldAt));
+
+  double _sumReceived(List<Sale> sales) => sales.fold<double>(0, (sum, sale) => sum + sale.effectiveReceivedAmount);
+
+  double _percentTrend(double current, double previous) {
+    if (previous == 0) return current == 0 ? 0 : 100;
+    return (current - previous) / previous * 100;
   }
 
-  _TopProduct? _topProduct(List<Sale> sales) {
+  String _monthShort(DateTime value) => DateFormat('MMM', 'es_CO').format(value).replaceAll('.', '');
+
+  Map<ProductCategory, _CategoryMetric> _categoryTotals(List<Sale> sales) {
+    final result = {
+      for (final category in ProductCategory.values) category: const _CategoryMetric(),
+    };
+    for (final sale in sales) {
+      for (final item in sale.items) {
+        final category = item.category ?? ProductCategory.nutrition;
+        final current = result[category]!;
+        result[category] = _CategoryMetric(
+          value: current.value + item.totalSale,
+          points: current.points + item.totalPoints,
+        );
+      }
+    }
+    return result;
+  }
+
+  List<_TopProduct> _topProducts(List<Sale> sales) {
     final items = <String, _TopProduct>{};
     for (final sale in sales) {
       for (final item in sale.items) {
@@ -610,68 +920,99 @@ class _SalesDashboard extends StatelessWidget {
         );
       }
     }
-    if (items.isEmpty) return null;
     final values = items.values.toList()
       ..sort((a, b) {
         final byUnits = b.units.compareTo(a.units);
         return byUnits != 0 ? byUnits : b.revenue.compareTo(a.revenue);
       });
-    return values.first;
+    return values.take(3).toList();
   }
+
+  String _filterLabel(SaleHistoryFilter value) => switch (value) {
+        SaleHistoryFilter.all => 'Todas',
+        SaleHistoryFilter.completed => 'Completadas',
+        SaleHistoryFilter.cancelled => 'Canceladas',
+      };
 }
 
-class _DashboardMetric extends StatelessWidget {
-  const _DashboardMetric({
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
     required this.icon,
+    required this.iconColor,
     required this.label,
     required this.value,
-    required this.color,
-    this.subtitle,
+    this.trend,
+    this.trendSuffix,
+    this.footnote,
+    this.trendAsPoints = false,
+    this.trendAsCount = false,
   });
-
   final IconData icon;
+  final Color iconColor;
   final String label;
   final String value;
-  final Color color;
-  final String? subtitle;
+  final num? trend;
+  final String? trendSuffix;
+  final String? footnote;
+  final bool trendAsPoints;
+  final bool trendAsCount;
 
   @override
   Widget build(BuildContext context) {
+    final valueTrend = trend;
+    final positive = valueTrend == null || valueTrend >= 0;
+    final trendColor = positive ? const Color(0xFF159D5A) : AppColors.danger;
+    String trendText = '';
+    if (valueTrend != null) {
+      final sign = positive ? '↑' : '↓';
+      final absolute = valueTrend.abs();
+      if (trendAsPoints) {
+        trendText = '$sign ${absolute.toStringAsFixed(0)} pts';
+      } else if (trendAsCount) {
+        trendText = '$sign ${absolute.toStringAsFixed(0)}';
+      } else {
+        trendText = '$sign ${absolute.toStringAsFixed(0)}%';
+      }
+    }
     return Container(
+      constraints: const BoxConstraints(minHeight: 116),
       padding: const EdgeInsets.all(12),
       decoration: _cardDecoration(),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color.withOpacity(.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: color),
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(color: iconColor.withOpacity(.11), borderRadius: BorderRadius.circular(11)),
+            child: Icon(icon, color: iconColor, size: 22),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                Text(label, maxLines: 2, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                const SizedBox(height: 3),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-                  ),
+                  child: Text(value, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
                 ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    maxLines: 2,
-                    style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                if (valueTrend != null) ...[
+                  const SizedBox(height: 4),
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: trendText, style: TextStyle(color: trendColor, fontWeight: FontWeight.w800)),
+                      if (trendSuffix != null) TextSpan(text: '  $trendSuffix', style: const TextStyle(color: AppColors.muted)),
+                    ]),
+                    style: const TextStyle(fontSize: 9.5),
                   ),
+                ],
+                if (footnote != null) ...[
+                  const SizedBox(height: 3),
+                  Text(footnote!, maxLines: 2, style: const TextStyle(fontSize: 9, color: AppColors.muted)),
+                ],
               ],
             ),
           ),
@@ -681,68 +1022,225 @@ class _DashboardMetric extends StatelessWidget {
   }
 }
 
-class _TopProductCard extends StatelessWidget {
-  const _TopProductCard({required this.top});
-
-  final _TopProduct? top;
+class _PointsProgressCard extends StatelessWidget {
+  const _PointsProgressCard({required this.points, required this.goal, required this.progress});
+  final int points;
+  final int goal;
+  final double progress;
 
   @override
   Widget build(BuildContext context) {
-    final value = top;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF6EEFA),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.purple.withOpacity(.2)),
-      ),
-      child: value == null
-          ? const Row(
-              children: [
-                Icon(Icons.workspace_premium_outlined, color: AppColors.orange),
-                SizedBox(width: 10),
-                Text('Producto más vendido: Sin ventas'),
-              ],
-            )
-          : Row(
-              children: [
-                const Icon(
-                  Icons.workspace_premium_outlined,
-                  color: AppColors.orange,
-                  size: 32,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Producto más vendido',
-                        style: TextStyle(fontSize: 12, color: AppColors.muted),
-                      ),
-                      Text(
-                        value.item.productName,
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      Text('${value.units} unidades · ${value.points} pts'),
-                    ],
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(color: AppColors.purple.withOpacity(.1), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.track_changes_outlined, color: AppColors.purple),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Progreso de puntos del mes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800))),
+              Text('$points / $goal pts', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 8,
+                    backgroundColor: const Color(0xFFE9DDF0),
+                    color: AppColors.purple,
                   ),
                 ),
-                ProductAvatar(product: value.product, size: 56),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              Text('${(progress * 100).round()}%', style: const TextStyle(fontWeight: FontWeight.w900)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text('Meta mensual de puntos', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategorySalesCard extends StatelessWidget {
+  const _CategorySalesCard({required this.category, required this.total, required this.formatter});
+  final Map<ProductCategory, _CategoryMetric> category;
+  final double total;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = ProductCategory.values.map((key) => category[key]!.value).toList();
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(children: [
+            Expanded(child: Text('Ventas por categoría', style: _sectionTitle)),
+            Text('Ver detalle ›', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+          ]),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 92,
+                height: 92,
+                child: CustomPaint(
+                  painter: _DonutPainter(
+                    values: values,
+                    colors: const [AppColors.purple, AppColors.orange, Color(0xFF19B39D)],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  children: [
+                    _LegendRow(label: 'Nutrición', color: AppColors.purple, value: category[ProductCategory.nutrition]!.value, total: total, formatter: formatter),
+                    _LegendRow(label: 'Belleza', color: AppColors.orange, value: category[ProductCategory.beauty]!.value, total: total, formatter: formatter),
+                    _LegendRow(label: 'Cuidado personal', color: const Color(0xFF19B39D), value: category[ProductCategory.kit]!.value, total: total, formatter: formatter),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendRow extends StatelessWidget {
+  const _LegendRow({required this.label, required this.color, required this.value, required this.total, required this.formatter});
+  final String label;
+  final Color color;
+  final double value;
+  final double total;
+  final CurrencyFormatter formatter;
+  @override
+  Widget build(BuildContext context) {
+    final percent = total <= 0 ? 0 : value / total * 100;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 9.5))),
+          Text('${formatter.money(value)} (${percent.round()}%)', style: const TextStyle(fontSize: 9.2, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _DonutPainter extends CustomPainter {
+  const _DonutPainter({required this.values, required this.colors});
+  final List<double> values;
+  final List<Color> colors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = values.fold<double>(0, (a, b) => a + b);
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 7;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 18
+      ..strokeCap = StrokeCap.butt;
+    if (total <= 0) {
+      paint.color = AppColors.line;
+      canvas.drawCircle(center, radius, paint);
+      return;
+    }
+    var start = -math.pi / 2;
+    for (var i = 0; i < values.length; i++) {
+      final sweep = values[i] / total * math.pi * 2;
+      if (sweep <= 0) continue;
+      paint.color = colors[i % colors.length];
+      canvas.drawArc(rect, start, sweep, false, paint);
+      start += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DonutPainter oldDelegate) => oldDelegate.values != values;
+}
+
+class _TopThreeProductsCard extends StatelessWidget {
+  const _TopThreeProductsCard({required this.products, required this.totalSales, required this.formatter});
+  final List<_TopProduct> products;
+  final double totalSales;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(children: [
+            Expanded(child: Text('Top 3 productos más vendidos', style: _sectionTitle)),
+            Text('Ver todo ›', style: TextStyle(fontSize: 10, color: AppColors.muted)),
+          ]),
+          const SizedBox(height: 8),
+          if (products.isEmpty)
+            const Padding(padding: EdgeInsets.all(16), child: Center(child: Text('Sin ventas en este mes.')))
+          else
+            ...products.asMap().entries.map((entry) {
+              final index = entry.key;
+              final item = entry.value;
+              final rankColor = switch (index) { 0 => const Color(0xFFFFB400), 1 => const Color(0xFFB8BBC6), _ => const Color(0xFFD97A45) };
+              final percent = totalSales <= 0 ? 0 : item.revenue / totalSales * 100;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    CircleAvatar(radius: 12, backgroundColor: rankColor, child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900))),
+                    const SizedBox(width: 9),
+                    ProductAvatar(product: item.product, size: 42),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.item.productName, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                          Text('${item.units} unidades · ${item.points} pts', style: const TextStyle(fontSize: 9.5, color: AppColors.muted)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(formatter.money(item.revenue), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                        Text('${percent.round()}% del total', style: const TextStyle(fontSize: 9, color: AppColors.muted)),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 }
 
 class _SaleHistoryCard extends StatelessWidget {
-  const _SaleHistoryCard({
-    required this.sale,
-    required this.number,
-    required this.formatter,
-    required this.onTap,
-  });
-
+  const _SaleHistoryCard({required this.sale, required this.number, required this.formatter, required this.onTap});
   final Sale sale;
   final int number;
   final CurrencyFormatter formatter;
@@ -751,52 +1249,34 @@ class _SaleHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 9),
       decoration: _cardDecoration(),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(13),
+          padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              const CircleAvatar(
-                backgroundColor: AppColors.purple,
-                child: Icon(Icons.shopping_bag_outlined, color: Colors.white),
-              ),
-              const SizedBox(width: 12),
+              const CircleAvatar(backgroundColor: AppColors.purple, child: Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20)),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Venta #${number.toString().padLeft(4, '0')}',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    Text(DateFormat('dd/MM/yyyy hh:mm a', 'es_CO').format(sale.soldAt)),
-                    const SizedBox(height: 4),
-                    Text('${sale.totalUnits} unidades · ${sale.totalPoints} pts'),
+                    Text('Venta #${number.toString().padLeft(4, '0')}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                    Text(DateFormat('dd/MM/yyyy hh:mm a', 'es_CO').format(sale.soldAt), style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                    Text('${sale.totalUnits} unidades · ${sale.totalPoints} pts', style: const TextStyle(fontSize: 10.5)),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   _StatusBadge(status: sale.status),
-                  const SizedBox(height: 5),
-                  Text(
-                    formatter.money(sale.effectiveReceivedAmount),
-                    style: const TextStyle(
-                      color: AppColors.purple,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  Text(
-                    'Ganancia ${formatter.money(sale.totalProfit)}',
-                    style: const TextStyle(fontSize: 11),
-                  ),
+                  const SizedBox(height: 4),
+                  Text(formatter.money(sale.effectiveReceivedAmount), style: const TextStyle(color: AppColors.purple, fontSize: 15, fontWeight: FontWeight.w900)),
+                  Text('Ganancia ${formatter.money(sale.totalProfit)}', style: const TextStyle(fontSize: 9.5)),
                 ],
               ),
               const Icon(Icons.chevron_right, color: AppColors.muted),
@@ -810,36 +1290,63 @@ class _SaleHistoryCard extends StatelessWidget {
 
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.status});
-
   final SaleStatus status;
-
   @override
   Widget build(BuildContext context) {
     final completed = status == SaleStatus.completed;
     final color = completed ? const Color(0xFF238A53) : AppColors.danger;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(.12),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        completed ? 'Completada' : 'Cancelada',
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800),
-      ),
+      decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)),
+      child: Text(completed ? 'Completada' : 'Cancelada', style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w800)),
     );
   }
 }
 
-class _TopProduct {
-  const _TopProduct({
-    required this.item,
-    required this.units,
-    required this.revenue,
-    required this.points,
-    required this.countryCode,
+class _ResponsiveGrid extends StatelessWidget {
+  const _ResponsiveGrid({
+    required this.children,
+    this.preferredColumns = 2,
+    this.minItemWidth = 150,
+    this.gap = 8,
   });
+  final List<Widget> children;
+  final int preferredColumns;
+  final double minItemWidth;
+  final double gap;
 
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxByWidth = math.max(1, ((constraints.maxWidth + gap) / (minItemWidth + gap)).floor());
+        final columns = math.min(preferredColumns, maxByWidth);
+        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: children.map((child) => SizedBox(width: width, child: child)).toList(),
+        );
+      },
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(13), decoration: _cardDecoration(), child: child);
+}
+
+class _CategoryMetric {
+  const _CategoryMetric({this.value = 0, this.points = 0});
+  final double value;
+  final int points;
+}
+
+class _TopProduct {
+  const _TopProduct({required this.item, required this.units, required this.revenue, required this.points, required this.countryCode});
   final SaleItem item;
   final int units;
   final double revenue;
@@ -851,7 +1358,7 @@ class _TopProduct {
         countryCode: countryCode,
         name: item.productName,
         code: item.productCode,
-        category: ProductCategory.nutrition,
+        category: item.category ?? ProductCategory.nutrition,
         suggestedPrice: item.suggestedUnitPrice,
         points: item.pointsPerUnit,
         imageUrl: item.imageUrl,
@@ -859,13 +1366,13 @@ class _TopProduct {
       );
 }
 
+const TextStyle _sectionTitle = TextStyle(fontSize: 13, fontWeight: FontWeight.w900);
+
 BoxDecoration _cardDecoration() {
   return BoxDecoration(
     color: Colors.white,
-    borderRadius: BorderRadius.circular(8),
-    border: Border.all(color: AppColors.line),
-    boxShadow: const [
-      BoxShadow(color: Color(0x0D000000), blurRadius: 10, offset: Offset(0, 3)),
-    ],
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: const Color(0xFFEAE7ED)),
+    boxShadow: const [BoxShadow(color: Color(0x09000000), blurRadius: 10, offset: Offset(0, 3))],
   );
 }

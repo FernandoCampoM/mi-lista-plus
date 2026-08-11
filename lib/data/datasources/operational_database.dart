@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../../domain/entities/country.dart';
 import '../../domain/entities/customer.dart';
 import '../../domain/entities/follow_up.dart';
+import '../../domain/entities/follow_up_note.dart';
 import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/inventory_movement.dart';
 import '../../domain/entities/product.dart';
@@ -27,7 +28,7 @@ class OperationalDatabase {
     final root = await getApplicationSupportDirectory();
     final database = await openDatabase(
       p.join(root.path, 'mi_lista_plus_operational.sqlite'),
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
         try {
@@ -47,6 +48,10 @@ class OperationalDatabase {
         await db.execute('CREATE INDEX follow_up_due_idx ON follow_ups(status, due_at)');
         await db.execute('CREATE TABLE product_follow_up_config(product_id TEXT NOT NULL, country_code TEXT NOT NULL, enabled INTEGER NOT NULL, duration_unit TEXT NOT NULL, duration_value INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(product_id, country_code))');
         await db.execute('CREATE TABLE sync_history(id TEXT PRIMARY KEY, direction TEXT NOT NULL, modules TEXT NOT NULL, mode TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL, details TEXT)');
+        await _createNotesTable(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) await _createNotesTable(db);
       },
     );
     var id = await _metadata(database, 'device_id');
@@ -71,7 +76,14 @@ class OperationalDatabase {
         stackTrace: stackTrace,
       );
     }
+    await result._migrateLegacyFollowUpNotes();
     return result;
+  }
+
+  static Future<void> _createNotesTable(DatabaseExecutor db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS follow_up_notes(id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, follow_up_id TEXT, sale_id TEXT, product_id TEXT, created_at TEXT NOT NULL, updated_at TEXT, payload TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))');
+    await db.execute('CREATE INDEX IF NOT EXISTS note_customer_idx ON follow_up_notes(customer_id, created_at DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS note_follow_up_idx ON follow_up_notes(follow_up_id)');
   }
 
   static Future<String?> _metadata(Database db, String key) async {
@@ -268,9 +280,76 @@ class OperationalDatabase {
     });
   }
 
+  Future<List<FollowUpNote>> loadFollowUpNotes({String? customerId}) async {
+    final rows = await _database.query(
+      'follow_up_notes',
+      where: customerId == null ? null : 'customer_id = ?',
+      whereArgs: customerId == null ? null : [customerId],
+      orderBy: 'created_at DESC',
+    );
+    return rows
+        .map((row) => FollowUpNote.fromJson(
+            jsonDecode(row['payload'] as String) as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> saveFollowUpNote(FollowUpNote note) async {
+    if (note.text.trim().isEmpty) {
+      throw ArgumentError('La nota no puede estar vacia.');
+    }
+    await _database.insert(
+      'follow_up_notes',
+      {
+        'id': note.id,
+        'customer_id': note.customerId,
+        'follow_up_id': note.followUpId,
+        'sale_id': note.saleId,
+        'product_id': note.productId,
+        'created_at': note.createdAt.toIso8601String(),
+        'updated_at': note.updatedAt?.toIso8601String(),
+        'payload': jsonEncode(note.toJson()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> _migrateLegacyFollowUpNotes() async {
+    if (await _metadata(_database, 'follow_up_notes_migrated') == '1') return;
+    final followUps = await loadFollowUps();
+    await _database.transaction((txn) async {
+      for (final item in followUps.where((entry) => entry.notes.trim().isNotEmpty)) {
+        final note = FollowUpNote(
+          id: 'legacy_${item.id}',
+          customerId: item.customerId,
+          followUpId: item.id,
+          saleId: item.saleId,
+          productId: item.productId,
+          followUpType: item.type.name,
+          text: item.notes.trim(),
+          deviceId: deviceId,
+          createdAt: item.completedAt ?? item.createdAt,
+        );
+        await txn.insert('follow_up_notes', {
+          'id': note.id,
+          'customer_id': note.customerId,
+          'follow_up_id': note.followUpId,
+          'sale_id': note.saleId,
+          'product_id': note.productId,
+          'created_at': note.createdAt.toIso8601String(),
+          'updated_at': null,
+          'payload': jsonEncode(note.toJson()),
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      await txn.insert('metadata', {
+        'key': 'follow_up_notes_migrated',
+        'value': '1',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
   Future<Map<String, dynamic>> exportModules(Set<String> modules) async {
     final result = <String, dynamic>{
-      'schemaVersion': 1,
+      'schemaVersion': 2,
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
       'deviceId': deviceId,
       'modules': modules.toList()..sort(),
@@ -288,21 +367,29 @@ class OperationalDatabase {
       );
     }
     if (modules.contains('clients')) result['clients'] = await _database.query('customers');
-    if (modules.contains('followups')) result['followups'] = await _database.query('follow_ups');
+    if (modules.contains('followups')) {
+      result['followups'] = await _database.query('follow_ups');
+      result['notes'] = await _database.query('follow_up_notes');
+    }
     if (modules.contains('config')) result['config'] = await _database.query('product_follow_up_config');
     return result;
   }
 
   Future<Map<String, int>> importModules(Map<String, dynamic> data, {required bool replace}) async {
-    if (data['schemaVersion'] != 1) throw const FormatException('Version de respaldo no compatible.');
+    final schemaVersion = data['schemaVersion'];
+    if (schemaVersion != 1 && schemaVersion != 2) {
+      throw const FormatException('Version de respaldo no compatible.');
+    }
     final counts = <String, int>{};
     await _database.transaction((txn) async {
       final inventoryRows = (data['inventory'] as List?) ?? const [];
       final snapshotRows = (data['snapshots'] as List?) ?? const [];
       final clientRows = (data['clients'] as List?) ?? const [];
       final followUpRows = (data['followups'] as List?) ?? const [];
+      final noteRows = (data['notes'] as List?) ?? const [];
       final configRows = (data['config'] as List?) ?? const [];
       if (replace) {
+        if (noteRows.isNotEmpty || followUpRows.isNotEmpty || clientRows.isNotEmpty) await txn.delete('follow_up_notes');
         if (followUpRows.isNotEmpty || clientRows.isNotEmpty) await txn.delete('follow_ups');
         if (clientRows.isNotEmpty) await txn.delete('customers');
         if (inventoryRows.isNotEmpty) await txn.delete('inventory_movements');
@@ -328,6 +415,7 @@ class OperationalDatabase {
       await apply('snapshots', 'snapshots');
       await apply('clients', 'customers');
       await apply('followups', 'follow_ups');
+      await apply('notes', 'follow_up_notes');
       await apply('config', 'product_follow_up_config');
       // Consultas dentro de la transaccion fuerzan la validacion de tipos y claves.
       await txn.rawQuery('SELECT COUNT(*) FROM inventory_movements');
