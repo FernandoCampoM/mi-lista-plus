@@ -1,7 +1,7 @@
 name: mi_lista_plus
 description: App Flutter online-first para consultar precios, puntos y generar simulaciones de Mi Lista +.
 publish_to: "none"
-version: 0.2.7+9
+version: 0.2.8+10
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

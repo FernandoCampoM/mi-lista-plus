@@ -29,6 +29,8 @@ class ProductRepositoryImpl implements ProductRepository {
   final ConnectivityService _connectivityService;
   OperationalDatabase? operationalDatabase;
 
+  bool get remoteAvailable => _remoteDataSource.isAvailable;
+
   void attachOperationalDatabase(OperationalDatabase database) {
     operationalDatabase = database;
   }
@@ -91,8 +93,10 @@ class ProductRepositoryImpl implements ProductRepository {
       // sin esperar al dia siguiente. Los productos solo se descargan
       // cuando la version remota cambia o cuando force=true.
       final metadata = await _remoteDataSource.fetchCatalogMetadata(countryCode);
+      // El catálogo de Hive es la fuente de respaldo offline. Una respuesta remota
+      // vacía, incompleta o temporalmente no disponible nunca debe borrar el
+      // último catálogo válido que ya tiene el usuario.
       if (metadata == null || metadata.productsCount <= 0) {
-        await _localStore.clearProducts(countryCode);
         await _localStore.saveLastSync(countryCode, now);
         return;
       }
@@ -104,9 +108,8 @@ class ProductRepositoryImpl implements ProductRepository {
           await _localStore.saveProducts(countryCode, products);
           _cacheImagesInBackground(products);
           await _localStore.saveCatalogVersion(countryCode, metadata.version);
-        } else {
-          await _localStore.clearProducts(countryCode);
         }
+        // Si la descarga viene vacía conservamos el catálogo anterior.
       }
 
       await _localStore.saveLastSync(countryCode, now);

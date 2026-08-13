@@ -21,6 +21,7 @@ import 'data/datasources/firestore_product_remote_data_source.dart';
 import 'data/datasources/local_store.dart';
 import 'data/datasources/operational_database.dart';
 import 'data/repositories/product_repository_impl.dart';
+import 'domain/entities/country.dart';
 import 'firebase_options.dart';
 import 'presentation/screens/customers_screen.dart';
 import 'presentation/screens/follow_up_detail_sheet.dart';
@@ -55,7 +56,7 @@ class _BootstrapRootState extends State<_BootstrapRoot> {
   }
 
   Future<_Runtime> _createRuntimeWithLimit() =>
-      _createRuntime().timeout(const Duration(seconds: 12));
+      _createRuntime().timeout(const Duration(seconds: 20));
 
   Future<_Runtime> _createRuntime() async {
     final total = Stopwatch()..start();
@@ -75,9 +76,46 @@ class _BootstrapRootState extends State<_BootstrapRoot> {
     _timing('Hive/SharedPreferences', hiveWatch);
     final localStore = LocalStore(preferences, box);
     final notificationService = FollowUpNotificationService();
+
+    // Inicio local-first:
+    // 1) si Hive ya tiene catálogo, no esperamos red para mostrar la app;
+    // 2) si no existe catálogo local, intentamos Firebase una sola vez para
+    //    descargarlo y guardarlo en Hive antes de continuar.
+    final startupCountryCode =
+        localStore.getSelectedCountry() ?? defaultCountryCode;
+    final hasLocalCatalog =
+        localStore.loadProducts(startupCountryCode).isNotEmpty;
+
+    var remoteDataSource = FirestoreProductRemoteDataSource(null);
+    if (!hasLocalCatalog) {
+      final firebaseWatch = Stopwatch()..start();
+      try {
+        await _ensureFirebaseInitialized()
+            .timeout(const Duration(seconds: 6));
+        final firestore = _configuredFirestore();
+        remoteDataSource = FirestoreProductRemoteDataSource(firestore);
+        final firstCatalogRepository = ProductRepositoryImpl(
+          localStore: localStore,
+          remoteDataSource: remoteDataSource,
+          connectivityService: ConnectivityService(Connectivity()),
+        );
+        await firstCatalogRepository
+            .syncProductsIfNeeded(startupCountryCode, force: true)
+            .timeout(const Duration(seconds: 10));
+        _timing('Primer catálogo Firebase -> Hive', firebaseWatch);
+      } catch (error, stackTrace) {
+        developer.log(
+          'No fue posible descargar el catálogo inicial; se continuará offline.',
+          name: 'mi_lista_plus.startup',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
     final repository = ProductRepositoryImpl(
       localStore: localStore,
-      remoteDataSource: FirestoreProductRemoteDataSource(null),
+      remoteDataSource: remoteDataSource,
       connectivityService: ConnectivityService(Connectivity()),
     );
     final state = AppState(
@@ -240,11 +278,9 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
   }
 
   void _stateChanged() {
-    if (!widget.state.isLoading &&
-        widget.state.selectedCountry != null &&
-        !postHomeStarted) {
+    if (!widget.state.isLoading && !postHomeStarted) {
       postHomeStarted = true;
-      _timing('Home con datos locales', homeWatch);
+      _timing('Interfaz con datos locales', homeWatch);
       WidgetsBinding.instance.addPostFrameCallback((_) => _initializeAfterHome());
     }
   }
@@ -297,23 +333,43 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
     if (preferences == null || localStore == null) return;
     final watch = Stopwatch()..start();
     try {
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+      await _ensureFirebaseInitialized()
           .timeout(const Duration(seconds: 6));
-      final firestore = FirebaseFirestore.instance;
-      firestore.settings = const Settings(persistenceEnabled: true);
+      final firestore = _configuredFirestore();
       _timing('Firebase', watch);
-      final country = widget.state.selectedCountry;
+
+      // Firebase se conecta siempre después de que la UI local está disponible.
+      // Al adjuntar este repositorio, cambios de país posteriores también pueden
+      // descargar el catálogo aunque la aplicación haya arrancado sin caché.
+      final remoteRepository = ProductRepositoryImpl(
+        localStore: localStore,
+        remoteDataSource: FirestoreProductRemoteDataSource(firestore),
+        connectivityService: ConnectivityService(Connectivity()),
+        operationalDatabase: widget.operationalDatabase,
+      );
+      widget.state.attachRepository(remoteRepository);
+
+      var country = widget.state.selectedCountry;
+      if (country == null) {
+        final storedCode = localStore.getSelectedCountry();
+        if (storedCode != null && widget.state.countries.isNotEmpty) {
+          for (final candidate in widget.state.countries) {
+            if (candidate.code == storedCode) {
+              country = candidate;
+              break;
+            }
+          }
+        }
+      }
       if (country != null) {
-        final remoteRepository = ProductRepositoryImpl(
-          localStore: localStore,
-          remoteDataSource: FirestoreProductRemoteDataSource(firestore),
-          connectivityService: ConnectivityService(Connectivity()),
-          operationalDatabase: widget.operationalDatabase,
-        );
+        final countryToRefresh = country;
         unawaited(remoteRepository
-            .syncProductsIfNeeded(country.code)
+            .syncProductsIfNeeded(countryToRefresh.code)
             .timeout(const Duration(seconds: 8))
-            .then((_) => widget.state.loadCountry(country, persist: false))
+            .then((_) => widget.state.loadCountry(
+                  countryToRefresh,
+                  persist: false,
+                ))
             .catchError((_) => false));
       }
       final noticeService = StartupNoticeService(
@@ -432,6 +488,23 @@ class _Runtime {
   final SharedPreferences preferences;
   final LocalStore localStore;
   final OperationalDatabase? operationalDatabase;
+}
+
+Future<void> _ensureFirebaseInitialized() async {
+  if (Firebase.apps.isNotEmpty) return;
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+}
+
+FirebaseFirestore _configuredFirestore() {
+  final firestore = FirebaseFirestore.instance;
+  try {
+    firestore.settings = const Settings(persistenceEnabled: true);
+  } catch (_) {
+    // Si Firestore ya fue utilizado, su configuración ya quedó aplicada.
+  }
+  return firestore;
 }
 
 void _timing(String stage, Stopwatch watch) {

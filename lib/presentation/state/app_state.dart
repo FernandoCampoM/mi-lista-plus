@@ -25,7 +25,7 @@ class AppState extends ChangeNotifier {
       : _operationalDatabase = operationalDatabase,
         _notificationService = notificationService;
 
-  final ProductRepository _repository;
+  ProductRepository _repository;
   OperationalDatabase? _operationalDatabase;
   final FollowUpNotificationService? _notificationService;
   final _uuid = const Uuid();
@@ -108,7 +108,12 @@ class AppState extends ChangeNotifier {
       _cart.clear();
       editingSimulation = null;
       selectedDiscount = 0;
-      errorMessage = '${country.name} no tiene productos disponibles aun.';
+      final repository = _repository;
+      final remoteAvailable = repository is ProductRepositoryImpl &&
+          repository.remoteAvailable;
+      errorMessage = remoteAvailable
+          ? 'No se pudo descargar el catálogo de ${country.name}. Verifica tu conexión a Internet y vuelve a intentarlo.'
+          : 'No hay un catálogo guardado para ${country.name}. Conéctate a Internet la primera vez para descargarlo.';
       isLoading = false;
       notifyListeners();
       return false;
@@ -748,6 +753,14 @@ class AppState extends ChangeNotifier {
       followUps, customers,
       reminderHour: await db.reminderHour,
     );
+  }
+
+  void attachRepository(ProductRepository repository) {
+    _repository = repository;
+    final db = _operationalDatabase;
+    if (db != null && repository is ProductRepositoryImpl) {
+      repository.attachOperationalDatabase(db);
+    }
   }
 
   Future<void> attachOperationalDatabase(OperationalDatabase database) async {
