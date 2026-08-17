@@ -22,12 +22,35 @@ class AdaptiveBannerAd extends StatefulWidget {
 
 class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   BannerAd? _bannerAd;
+  AppAdService? _adService;
   AdSize? _adSize;
   int? _loadedWidth;
   bool _isLoading = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = AppScope.adsOf(context);
+    if (!identical(_adService, next)) {
+      _adService?.removeListener(_onAdConfigChanged);
+      _adService = next;
+      _adService?.addListener(_onAdConfigChanged);
+    }
+  }
+
+  void _onAdConfigChanged() {
+    if (!mounted) return;
+    _bannerAd?.dispose();
+    _bannerAd = null;
+    _adSize = null;
+    _loadedWidth = null;
+    _isLoading = false;
+    setState(() {});
+  }
+
+  @override
   void dispose() {
+    _adService?.removeListener(_onAdConfigChanged);
     _bannerAd?.dispose();
     super.dispose();
   }
@@ -35,7 +58,8 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   @override
   Widget build(BuildContext context) {
     final adService = AppScope.adsOf(context);
-    if (!adService.bannerEnabled(widget.placement)) {
+    final unitId = adService.bannerUnitId(widget.placement).trim();
+    if (!adService.bannerEnabled(widget.placement) || unitId.isEmpty) {
       _bannerAd?.dispose();
       _bannerAd = null;
       _adSize = null;
@@ -84,7 +108,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     }
 
     final bannerAd = BannerAd(
-      adUnitId: AppScope.adsOf(context).bannerUnitId(widget.placement),
+      adUnitId: AppScope.adsOf(context).bannerUnitId(widget.placement).trim(),
       size: size,
       request: const AdRequest(),
       listener: BannerAdListener(

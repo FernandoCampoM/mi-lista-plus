@@ -38,7 +38,7 @@ enum BannerPlacement {
   settings,
 }
 
-class AppAdService {
+class AppAdService extends ChangeNotifier {
   AppAdService(this._preferences, {FirebaseRemoteConfig? remoteConfig})
       : _remoteConfig = remoteConfig;
 
@@ -53,15 +53,15 @@ class AppAdService {
   static const _returnHomeMinimumDelay = Duration(minutes: 3);
 
   final SharedPreferences _preferences;
-  final FirebaseRemoteConfig? _remoteConfig;
+  FirebaseRemoteConfig? _remoteConfig;
   InterstitialAd? _interstitialAd;
   bool _isInitialized = false;
   bool _isLoadingInterstitial = false;
   bool _isShowingInterstitial = false;
-  bool _remoteDefaultsReady = false;
+  bool _remoteConfigReady = false;
 
   int get actionFrequency {
-    if (!_remoteDefaultsReady) return _defaultActionFrequency;
+    if (!_remoteConfigReady) return _defaultActionFrequency;
     final configured = _remoteConfig?.getInt(
       'ads_interstitial_action_frequency',
     );
@@ -71,7 +71,7 @@ class AppAdService {
   }
 
   Duration get interstitialCooldown {
-    if (!_remoteDefaultsReady) {
+    if (!_remoteConfigReady) {
       return const Duration(seconds: _defaultCooldownSeconds);
     }
     final configured = _remoteConfig?.getInt(
@@ -84,9 +84,10 @@ class AppAdService {
   }
 
   Future<void> initialize() async {
-    if (_isInitialized) return;
-
-    await _initializeRemoteConfig();
+    // Los anuncios no se inicializan hasta que Remote Config haya sido
+    // obtenido y activado. Así una instalación nueva/offline nunca cae
+    // accidentalmente en IDs de prueba o defaults habilitados.
+    if (_isInitialized || !_remoteConfigReady) return;
     try {
       await MobileAds.instance.initialize();
       _isInitialized = true;
@@ -96,16 +97,28 @@ class AppAdService {
     }
   }
 
+  Future<bool> configureRemoteConfig(FirebaseRemoteConfig remoteConfig) async {
+    _remoteConfig = remoteConfig;
+    final ready = await _initializeRemoteConfig();
+    if (!ready) return false;
+    await initialize();
+    notifyListeners();
+    return true;
+  }
+
   bool bannerEnabled(BannerPlacement placement) {
-    if (!_remoteDefaultsReady) return true;
-    return _remoteConfig?.getBool(
-          'ads_banner_${placement.name}_enabled',
-        ) ??
-        true;
+    if (!_remoteConfigReady) return false;
+    final remoteConfig = _remoteConfig;
+    if (remoteConfig == null) return false;
+
+    // Kill switch global opcional. Si no existe en Firebase conserva el
+    // comportamiento actual porque su default es true.
+    if (!remoteConfig.getBool('ads_enabled')) return false;
+    return remoteConfig.getBool('ads_banner_${placement.name}_enabled');
   }
 
   String bannerUnitId(BannerPlacement placement) {
-    if (!_remoteDefaultsReady) return AdMobConfig.bannerUnitId;
+    if (!_remoteConfigReady) return AdMobConfig.bannerUnitId;
     final platform = _platformKey;
     final placementId = _remoteConfig
             ?.getString('ads_banner_${placement.name}_unit_id_$platform')
@@ -129,7 +142,7 @@ class AppAdService {
   }
 
   Future<void> _recordImportantAction(ImportantAdAction action) async {
-    if (!_isInitialized) return;
+    if (!_isInitialized || !_interstitialEnabled) return;
 
     final currentCount = _preferences.getInt(_importantActionCountKey) ?? 0;
     final nextCount = currentCount + 1;
@@ -163,7 +176,7 @@ class AppAdService {
   }
 
   Future<void> showDisclaimerInterstitialOncePerDay() async {
-    if (!_isInitialized) return;
+    if (!_isInitialized || !_interstitialEnabled) return;
 
     final today = _dateKey(DateTime.now());
     final lastShownDate = _preferences.getString(
@@ -177,20 +190,27 @@ class AppAdService {
     }
   }
 
-  Future<void> _initializeRemoteConfig() async {
+  Future<bool> _initializeRemoteConfig() async {
     final remoteConfig = _remoteConfig;
-    if (remoteConfig == null) return;
+    if (remoteConfig == null) return false;
 
+    _remoteConfigReady = false;
     try {
       await remoteConfig.setConfigSettings(
         RemoteConfigSettings(
           fetchTimeout: const Duration(seconds: 8),
-          minimumFetchInterval: kDebugMode
-              ? const Duration(minutes: 1)
-              : const Duration(hours: 1),
+          // Los controles de publicidad funcionan también como kill-switch.
+          // Un intervalo corto evita mantener anuncios activos durante horas
+          // después de deshabilitarlos en Firebase.
+          // Remote Config se consulta en cada arranque, independientemente de si
+          // el catalogo local ya existe o si Firestore tiene cambios. La llamada
+          // ocurre en segundo plano, por lo que no bloquea el inicio local-first.
+          minimumFetchInterval: Duration.zero,
         ),
       );
       await remoteConfig.setDefaults({
+        'ads_enabled': true,
+        'ads_interstitial_enabled': true,
         'ads_interstitial_action_frequency': _defaultActionFrequency,
         'ads_interstitial_cooldown_seconds': _defaultCooldownSeconds,
         'ads_interstitial_unit_id_android': '',
@@ -198,21 +218,39 @@ class AppAdService {
         'ads_banner_unit_id_android': '',
         'ads_banner_unit_id_ios': '',
         for (final placement in BannerPlacement.values)
-          'ads_banner_${placement.name}_enabled': true,
+          'ads_banner_${placement.name}_enabled': false,
         for (final placement in BannerPlacement.values)
           'ads_banner_${placement.name}_unit_id_android': '',
         for (final placement in BannerPlacement.values)
           'ads_banner_${placement.name}_unit_id_ios': '',
       });
-      _remoteDefaultsReady = true;
       await remoteConfig.fetchAndActivate();
+      _remoteConfigReady = true;
+      return true;
     } catch (_) {
-      // Defaults and compile-time test IDs keep ads non-blocking when offline.
+      // Si Remote Config no está disponible, la publicidad permanece apagada.
+      // El catálogo y el resto de la app siguen funcionando offline.
+      _remoteConfigReady = false;
+      notifyListeners();
+      return false;
     }
   }
 
+
+  bool get _interstitialEnabled {
+    if (!_remoteConfigReady) return false;
+    final remoteConfig = _remoteConfig;
+    if (remoteConfig == null) return false;
+    return remoteConfig.getBool('ads_enabled') &&
+        remoteConfig.getBool('ads_interstitial_enabled') &&
+        _interstitialUnitId.trim().isNotEmpty;
+  }
+
   Future<void> _loadInterstitial() async {
-    if (!_isInitialized || _isLoadingInterstitial || _interstitialAd != null) {
+    if (!_isInitialized ||
+        !_interstitialEnabled ||
+        _isLoadingInterstitial ||
+        _interstitialAd != null) {
       return;
     }
 
@@ -281,7 +319,7 @@ class AppAdService {
   }
 
   String get _interstitialUnitId {
-    if (!_remoteDefaultsReady) return AdMobConfig.interstitialUnitId;
+    if (!_remoteConfigReady) return AdMobConfig.interstitialUnitId;
     final configured = _remoteConfig
             ?.getString('ads_interstitial_unit_id_$_platformKey')
             .trim() ??

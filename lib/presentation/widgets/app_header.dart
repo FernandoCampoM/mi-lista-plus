@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -164,9 +165,21 @@ class AppHeader extends StatelessWidget {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Versión 1.0',
-                  style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    final info = snapshot.data;
+                    final versionText = info == null
+                        ? 'Versión …'
+                        : 'Versión ${info.version} (${info.buildNumber})';
+                    return Text(
+                      versionText,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 18),
                 if (onOpenDataTransfer != null) ...[

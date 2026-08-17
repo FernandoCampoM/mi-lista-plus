@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/utils/text_search.dart';
 import '../../core/services/currency_formatter.dart';
 import '../../domain/entities/product.dart';
 import '../models/product_sort_option.dart';
@@ -39,9 +40,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
     final formatter = CurrencyFormatter(state.selectedCountry!);
     final products = state.products.where((product) {
       final matchesCategory = product.category == selectedCategory;
-      final matchesQuery = query.isEmpty ||
-          product.name.toLowerCase().contains(query.toLowerCase()) ||
-          product.code.contains(query);
+      final matchesQuery = searchMatchesProduct(
+        query: query,
+        name: product.name,
+        code: product.code,
+      );
       return matchesCategory && matchesQuery;
     }).toList();
     sortProducts(products, sortOption);

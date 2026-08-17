@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
+import '../../core/utils/text_search.dart';
 import '../../domain/entities/product.dart';
 import '../models/product_sort_option.dart';
 import '../state/app_scope.dart';
@@ -57,10 +58,7 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
     final state = AppScope.of(context);
     final formatter = CurrencyFormatter(state.selectedCountry!);
     final products = state.products.where((product) {
-      final normalized = query.trim().toLowerCase();
-      return normalized.isEmpty ||
-          product.name.toLowerCase().contains(normalized) ||
-          product.code.toLowerCase().contains(normalized);
+      return searchMatchesProduct(query: query, name: product.name, code: product.code);
     }).toList();
     sortProducts(products, sortOption, quantities: quantities);
 

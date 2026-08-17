@@ -15,8 +15,9 @@
 
 ## Remote Config
 
-El aviso de apertura utiliza `startup_notice_enabled`, `startup_notice_id` y
-`startup_notice_image_url`. Solo acepta HTTPS, limita la descarga a 5 MB y la
+El aviso de apertura utiliza `startup_notice_enabled`, `startup_notice_id`,
+`startup_notice_image_url` y `startup_notice_link_url`. El enlace es opcional y,
+si existe, abre el navegador al tocar la imagen. Solo acepta HTTPS, limita la descarga a 5 MB y la
 imagen a 4096 px por lado, espera un maximo de ocho segundos y registra hasta
 tres presentaciones por campaña e instalacion.
 
@@ -117,21 +118,25 @@ Configura estos parametros en Remote Config:
 
 | Parametro | Tipo | Predeterminado | Uso |
 | --- | --- | --- | --- |
+| `ads_enabled` | Booleano | `true` | Interruptor global para apagar toda la publicidad inmediatamente desde Remote Config. |
+| `ads_interstitial_enabled` | Booleano | `true` | Activa/desactiva únicamente los intersticiales. |
 | `ads_interstitial_action_frequency` | Numero | `10` | Acciones importantes requeridas antes de intentar mostrar un intersticial. |
 | `ads_interstitial_cooldown_seconds` | Numero | `180` | Espera minima entre intersticiales. |
 | `ads_interstitial_unit_id_android` | Texto | Vacio | ID remoto de intersticial para Android. |
 | `ads_interstitial_unit_id_ios` | Texto | Vacio | ID remoto de intersticial para iOS. |
 | `ads_banner_unit_id_android` | Texto | Vacio | ID global de banner para Android. |
 | `ads_banner_unit_id_ios` | Texto | Vacio | ID global de banner para iOS. |
-| `ads_banner_home_enabled` | Booleano | `true` | Banner de inicio. |
-| `ads_banner_simulations_enabled` | Booleano | `true` | Banner de simulaciones. |
-| `ads_banner_inventory_enabled` | Booleano | `true` | Banner de inventario. |
-| `ads_banner_sales_enabled` | Booleano | `true` | Banner de ventas e historial. |
-| `ads_banner_customers_enabled` | Booleano | `true` | Banner al final de clientes. |
-| `ads_banner_followups_enabled` | Booleano | `true` | Banner al final de seguimientos de hoy. |
-| `ads_banner_deliveries_enabled` | Booleano | `true` | Banner al final de entregas por confirmar. |
-| `ads_banner_backup_enabled` | Booleano | `true` | Banner de respaldo y sincronizacion. |
-| `ads_banner_settings_enabled` | Booleano | `true` | Banner de configuracion de seguimiento. |
+| `ads_banner_home_enabled` | Booleano | `false` | Banner de inicio. |
+| `ads_banner_simulations_enabled` | Booleano | `false` | Banner de simulaciones. |
+| `ads_banner_inventory_enabled` | Booleano | `false` | Banner de inventario. |
+| `ads_banner_sales_enabled` | Booleano | `false` | Banner de ventas e historial. |
+| `ads_banner_customers_enabled` | Booleano | `false` | Banner al final de clientes. |
+| `ads_banner_followups_enabled` | Booleano | `false` | Banner al final de seguimientos de hoy. |
+| `ads_banner_deliveries_enabled` | Booleano | `false` | Banner al final de entregas por confirmar. |
+| `ads_banner_backup_enabled` | Booleano | `false` | Banner de respaldo y sincronizacion. |
+| `ads_banner_settings_enabled` | Booleano | `false` | Banner de configuracion de seguimiento. |
+
+En release, si Remote Config no está listo o no existe un ID real, la app no usa IDs de prueba. Los IDs de prueba quedan restringidos a debug.
 
 Cada ubicacion tambien acepta un ID propio con el formato `ads_banner_<ubicacion>_unit_id_android` o `ads_banner_<ubicacion>_unit_id_ios`. Por ejemplo: `ads_banner_inventory_unit_id_android`. Si queda vacio, se usa el ID global y luego el ID de prueba/compilacion como respaldo.
 
@@ -274,3 +279,13 @@ dependencies {
 - Entrar a Respaldo y sincronizacion registra `backupOpened` como accion importante; sigue respetando `ads_interstitial_action_frequency` y `ads_interstitial_cooldown_seconds`.
 - Plantillas de seguimiento centralizadas con emojis funcionales/neutrales y sin corazones o emojis romanticos.
 - Las notificaciones Android usan un icono derivado del logo de la app, adaptado al formato monocromatico requerido por Android, y el logo de la app como icono grande.
+
+
+## Cambios 0.2.9+11
+
+- AdMob espera `fetchAndActivate()` de Remote Config antes de cargar banners o intersticiales. Si Remote Config no está disponible, los anuncios permanecen ocultos sin afectar el catálogo offline.
+- Se conserva el arranque local-first: Hive abre primero y Firebase solo descarga el catálogo inicial cuando no existe caché local.
+- El aviso de inicio admite `startup_notice_link_url` para abrir un enlace externo al tocar la imagen.
+- Las búsquedas de productos ignoran tildes.
+- Historial de compras del cliente alineado visualmente con el historial de ventas y notas de seguimiento renovadas.
+- El margen potencial excluye del costo del cálculo únicamente los productos sin puntos; los demás KPI siguen incluyendo todo el inventario.

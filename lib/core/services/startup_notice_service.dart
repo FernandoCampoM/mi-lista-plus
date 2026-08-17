@@ -8,9 +8,14 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StartupNotice {
-  const StartupNotice({required this.id, required this.bytes});
+  const StartupNotice({
+    required this.id,
+    required this.bytes,
+    this.linkUrl,
+  });
   final String id;
   final Uint8List bytes;
+  final Uri? linkUrl;
 }
 
 class StartupNoticeService {
@@ -32,21 +37,26 @@ class StartupNoticeService {
         'startup_notice_enabled': false,
         'startup_notice_id': '',
         'startup_notice_image_url': '',
+        'startup_notice_link_url': '',
       });
-      await _remoteConfig
-          .setConfigSettings(RemoteConfigSettings(
-            fetchTimeout: const Duration(seconds: 5),
-            minimumFetchInterval: const Duration(minutes: 15),
-          ));
-      await _remoteConfig.fetchAndActivate().timeout(const Duration(seconds: 6));
+      // Remote Config ya fue refrescado al iniciar los servicios remotos.
+      // Este servicio solo consume los valores activados para no cambiar el
+      // intervalo de fetch ni vincular el aviso a la sincronizacion del catalogo.
       if (!_remoteConfig.getBool('startup_notice_enabled')) return null;
       final id = _remoteConfig.getString('startup_notice_id').trim();
       final uri = Uri.tryParse(_remoteConfig.getString('startup_notice_image_url').trim());
       if (id.isEmpty || uri == null || uri.scheme != 'https' || uri.host.isEmpty) return null;
+      final linkRaw = _remoteConfig.getString('startup_notice_link_url').trim();
+      final parsedLink = linkRaw.isEmpty ? null : Uri.tryParse(linkRaw);
+      final linkUrl = parsedLink != null &&
+              (parsedLink.scheme == 'https' || parsedLink.scheme == 'http') &&
+              parsedLink.host.isNotEmpty
+          ? parsedLink
+          : null;
       if ((_preferences.getInt('startup_notice_views_$id') ?? 0) >= 3) return null;
       final bytes = await _download(uri);
       if (!await _validDimensions(bytes)) return null;
-      return StartupNotice(id: id, bytes: bytes);
+      return StartupNotice(id: id, bytes: bytes, linkUrl: linkUrl);
     } catch (_) {
       return null;
     }

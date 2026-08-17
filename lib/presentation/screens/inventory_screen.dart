@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/app_ad_service.dart';
 import '../../core/services/currency_formatter.dart';
+import '../../core/utils/text_search.dart';
 import '../../domain/entities/inventory_item.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/sale.dart';
@@ -322,12 +323,12 @@ class _InventoryOverview extends StatelessWidget {
       for (final item in inventory) item.product.id: item.quantity,
     };
     final sortedInventory = _sortInventory(inventory, sortOption);
-    final normalizedSearch = searchQuery.trim().toLowerCase();
-    final visibleInventory = sortedInventory.where((item) {
-      if (normalizedSearch.isEmpty) return true;
-      return item.product.name.toLowerCase().contains(normalizedSearch) ||
-          item.product.code.toLowerCase().contains(normalizedSearch);
-    }).toList();
+    final visibleInventory = sortedInventory.where((item) =>
+        searchMatchesProduct(
+          query: searchQuery,
+          name: item.product.name,
+          code: item.product.code,
+        )).toList();
     final totalPoints = inventory.fold<int>(
       0,
       (sum, item) => sum + item.product.points * item.quantity,
@@ -341,7 +342,14 @@ class _InventoryOverview extends StatelessWidget {
     final cost = state.inventoryDiscountedValue40;
     final publicValue = state.inventorySuggestedValue;
     final potentialProfit = publicValue - cost;
-    final margin = publicValue <= 0 ? 0.0 : potentialProfit / publicValue * 100;
+    // Solo para el porcentaje de margen se excluye del costo a los productos
+    // sin puntos. Los KPI de costo y ganancia potencial siguen incluyendo TODO.
+    final marginCost = inventory
+        .where((item) => item.product.points > 0)
+        .fold<double>(0, (sum, item) => sum + item.discountedValue40);
+    final margin = publicValue <= 0
+        ? 0.0
+        : (publicValue - marginCost) / publicValue * 100;
     final lowStockItems = inventory.where((item) => item.quantity == 1).toList();
     final noStockItems = state.products
         .where((product) => (quantities[product.id] ?? 0) <= 0)

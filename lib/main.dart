@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'core/constants/app_colors.dart';
 import 'core/services/app_ad_service.dart';
@@ -305,7 +306,8 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       }
       _timing('Notificaciones', watch);
     }
-    unawaited(widget.adService.initialize());
+    // AdMob espera a que Remote Config esté realmente disponible.
+    // Esto no toca ni bloquea el flujo local-first del catálogo.
     unawaited(_initializeRemote(openedFromNotification: openedFromNotification));
   }
 
@@ -349,6 +351,13 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       );
       widget.state.attachRepository(remoteRepository);
 
+      // La UI y el catálogo ya están disponibles en este punto. Ahora sí
+      // obtenemos Remote Config y, solo cuando termine correctamente,
+      // habilitamos/cargamos publicidad según los parámetros de Firebase.
+      await widget.adService.configureRemoteConfig(
+        FirebaseRemoteConfig.instance,
+      );
+
       var country = widget.state.selectedCountry;
       if (country == null) {
         final storedCode = localStore.getSelectedCountry();
@@ -384,27 +393,85 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
         if (context == null) return;
         await showDialog<void>(
           context: context,
-          builder: (dialogContext) => Dialog(
-            insetPadding: const EdgeInsets.all(18),
-            child: SafeArea(
-              child: Stack(children: [
-                InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 3,
-                  child: Image.memory(notice.bytes, fit: BoxFit.contain),
-                ),
-                Positioned(
-                  right: 6,
-                  top: 6,
-                  child: IconButton.filled(
-                    tooltip: 'Cerrar',
-                    onPressed: () => Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close),
+          builder: (dialogContext) {
+            final media = MediaQuery.of(dialogContext);
+            final noticeWidth = media.size.width * .94;
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 18),
+              child: SafeArea(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: noticeWidth,
+                      maxHeight: media.size.height * .88,
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Material(
+                            color: Colors.black,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: notice.linkUrl == null
+                                  ? null
+                                  : () async {
+                                      final uri = notice.linkUrl!;
+                                      if (await canLaunchUrl(uri)) {
+                                        await launchUrl(
+                                          uri,
+                                          mode: LaunchMode.externalApplication,
+                                        );
+                                      }
+                                    },
+                              child: InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 3,
+                                child: Image.memory(
+                                  notice.bytes,
+                                  width: noticeWidth,
+                                  fit: BoxFit.contain,
+                                  filterQuality: FilterQuality.medium,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: const Color(0x22000000)),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x55000000),
+                                  blurRadius: 8,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: IconButton(
+                              tooltip: 'Cerrar',
+                              color: Colors.black87,
+                              iconSize: 24,
+                              onPressed: () => Navigator.pop(dialogContext),
+                              icon: const Icon(Icons.close),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ]),
-            ),
-          ),
+              ),
+            );
+          },
         );
         await noticeService.markShown(notice.id);
       }

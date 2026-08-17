@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/utils/text_search.dart';
 import '../../core/services/app_ad_service.dart';
 import '../../domain/entities/product.dart';
 import '../state/app_scope.dart';
@@ -44,11 +45,9 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final normalized = query.trim().toLowerCase();
+    final normalized = normalizeSearchText(query);
     final products = state.products.where((product) {
-      return normalized.isEmpty ||
-          product.name.toLowerCase().contains(normalized) ||
-          product.code.toLowerCase().contains(normalized);
+      return searchMatchesProduct(query: normalized, name: product.name, code: product.code);
     }).toList()
       ..sort((a, b) {
         final byCategory = a.category.index.compareTo(b.category.index);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/services/currency_formatter.dart';
+import '../../core/utils/text_search.dart';
 import '../../domain/entities/inventory_item.dart';
 import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
@@ -31,15 +32,12 @@ class _SaleProductPickerScreenState
   String query = '';
 
   List<InventoryItem> get availableInventory {
-    final normalized = query.trim().toLowerCase();
     return widget.inventory.where((item) {
       if (item.quantity <= 0 ||
           widget.excludedProductIds.contains(item.product.id)) {
         return false;
       }
-      return normalized.isEmpty ||
-          item.product.name.toLowerCase().contains(normalized) ||
-          item.product.code.toLowerCase().contains(normalized);
+      return searchMatchesProduct(query: query, name: item.product.name, code: item.product.code);
     }).toList();
   }
 

@@ -27,24 +27,24 @@ class AdMobConfig {
   static String get bannerUnitId {
     return switch (defaultTargetPlatform) {
       TargetPlatform.iOS => _iosBannerProductionId.isEmpty
-          ? _iosBannerTestId
+          ? (kDebugMode ? _iosBannerTestId : '')
           : _iosBannerProductionId,
       TargetPlatform.android => _androidBannerProductionId.isEmpty
-          ? _androidBannerTestId
+          ? (kDebugMode ? _androidBannerTestId : '')
           : _androidBannerProductionId,
-      _ => _androidBannerTestId,
+      _ => kDebugMode ? _androidBannerTestId : '',
     };
   }
 
   static String get interstitialUnitId {
     return switch (defaultTargetPlatform) {
       TargetPlatform.iOS => _iosInterstitialProductionId.isEmpty
-          ? _iosInterstitialTestId
+          ? (kDebugMode ? _iosInterstitialTestId : '')
           : _iosInterstitialProductionId,
       TargetPlatform.android => _androidInterstitialProductionId.isEmpty
-          ? _androidInterstitialTestId
+          ? (kDebugMode ? _androidInterstitialTestId : '')
           : _androidInterstitialProductionId,
-      _ => _androidInterstitialTestId,
+      _ => kDebugMode ? _androidInterstitialTestId : '',
     };
   }
 }
