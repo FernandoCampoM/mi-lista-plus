@@ -28,7 +28,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
   bool obscurePassword = true;
   static const labels = {
     'inventory': 'Inventario', 'sales': 'Ventas', 'clients': 'Clientes',
-    'followups': 'Seguimientos y notas', 'simulations': 'Simulaciones', 'config': 'Configuracion local',
+    'followups': 'Seguimientos y notas', 'simulations': 'Simulaciones', 'config': 'Configuración local',
   };
 
   // CAMPO NUEVO: _privacyRequired
@@ -54,19 +54,19 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       ),
       Expanded(child: SafeArea(top: false, child: ListView(padding: const EdgeInsets.fromLTRB(18, 18, 18, 28), children: [
         const Text('Datos incluidos', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-        const Text('Las dependencias necesarias se agregan automaticamente.', style: TextStyle(color: AppColors.muted)),
+        const Text('Las dependencias necesarias se agregan automáticamente.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 8),
         ...labels.entries.map((entry) => CheckboxListTile(
           value: modules.contains(entry.key), title: Text(entry.value), contentPadding: EdgeInsets.zero,
           onChanged: busy ? null : (value) => setState(() => value == true ? modules.add(entry.key) : modules.remove(entry.key)),
-        )),
+        ),),
         TextField(
           controller: password,
           obscureText: obscurePassword,
           enableSuggestions: false,
           autocorrect: false,
           decoration: InputDecoration(
-            labelText: 'Contraseña (minimo 8 caracteres)',
+            labelText: 'Contraseña (mínimo 8 caracteres)',
             prefixIcon: const Icon(Icons.lock_outline),
             helperText: 'Se ignorarán espacios al inicio y al final.',
             suffixIcon: IconButton(
@@ -114,8 +114,8 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
               : const SizedBox.shrink(),
         ),
         const Divider(height: 34),
-        const Text('Sincronizacion cercana manual', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-        const Text('Un dispositivo envia y el otro recibe. El sistema comparte un paquete cifrado por Bluetooth, Nearby Share, AirDrop o la opcion cercana disponible.', style: TextStyle(color: AppColors.muted)),
+        const Text('Sincronización cercana manual', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+        const Text('Un dispositivo envía y el otro recibe. El sistema comparte un paquete cifrado por Bluetooth, Nearby Share, AirDrop o la opción cercana disponible.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 12),
         FilledButton.tonalIcon(onPressed: busy ? null : _sendNearby, icon: const Icon(Icons.send_to_mobile), label: const Text('ENVIAR DATOS')),
         OutlinedButton.icon(onPressed: busy ? null : _receiveNearby, icon: const Icon(Icons.install_mobile), label: const Text('RECIBIR DATOS')),
@@ -125,8 +125,8 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
           margin: EdgeInsets.only(top: 16, bottom: 4),
           maxHeight: 72,
         ),
-      ]))),
-    ]),
+      ],),),),
+    ],),
   );
 
   Future<void> _saveBackup() async {
@@ -197,7 +197,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       } finally {
         if (await file.exists()) await file.delete();
       }
-    }, 'Respaldo compartido correctamente.');
+    }, 'Respaldo compartido correctamente.',);
   }
 
   Future<void> _import() async {
@@ -209,7 +209,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
   }
 
   Future<void> _sendNearby() async {
-    if (modules.isEmpty) { _message('Selecciona al menos un modulo.'); return; }
+    if (modules.isEmpty) { _message('Selecciona al menos un módulo.'); return; }
     final code = EncryptedBackupService.generatePairingCode();
     final root = await getTemporaryDirectory();
     final file = File(p.join(root.path, 'mi_lista_plus_sync.mlplus'));
@@ -225,10 +225,10 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
           title: const Text('Código de emparejamiento'),
           content: SelectableText('$code\n\nComunica este código al dispositivo receptor. Solo sirve para este paquete.', textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
           actions: [ElevatedButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CONTINUAR'))],
-        ));
+        ),);
         await Share.shareXFiles(
           [XFile(file.path)],
-          subject: 'Sincronizacion Mi Lista+',
+          subject: 'Sincronización Mi Lista+',
         );
         if (mounted) {
           await AppScope.adsOf(context).recordImportantAction(
@@ -238,7 +238,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       } finally {
         if (await file.exists()) await file.delete();
       }
-    }, 'Paquete enviado al selector del sistema.');
+    }, 'Paquete enviado al selector del sistema.',);
   }
 
   Future<void> _receiveNearby() async {
@@ -247,7 +247,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       title: const Text('Recibir datos'),
       content: TextField(controller: codeController, keyboardType: TextInputType.visiblePassword, textCapitalization: TextCapitalization.characters, autocorrect: false, enableSuggestions: false, maxLength: 12, decoration: const InputDecoration(labelText: 'Código de emparejamiento', helperText: 'Ejemplo: K7PX-M3QD-9R')),
       actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, codeController.text), child: const Text('SELECCIONAR ARCHIVO'))],
-    ));
+    ),);
     Future<void>.delayed(
       const Duration(milliseconds: 400),
       codeController.dispose,
@@ -280,7 +280,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         title: const Text('Vista previa'),
         content: Text('Fecha: ${DateFormat('d MMM y, h:mm a', 'es_CO').format(preview.exportedAt.toLocal())}\nMódulos: ${preview.modules.map((item) => labels[item] ?? item).join(', ')}\nRegistros: ${preview.counts.values.fold<int>(0, (sum, value) => sum + value)}\n\nCombinar conserva lo existente. Reemplazar sustituye los modulos incluidos.'),
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), OutlinedButton(onPressed: () => Navigator.pop(dialogContext, 'merge'), child: const Text('COMBINAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, 'replace'), child: const Text('REEMPLAZAR'))],
-      ));
+      ),);
       if (mode == null || !mounted) return;
       final counts = await state.backupService.importPreview(preview, replace: mode == 'replace');
       await state.reloadAfterImport();
@@ -290,7 +290,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         );
       }
       if (!mounted) return;
-      _message('Importacion completada: ${counts.values.fold<int>(0, (sum, value) => sum + value)} registros.');
+      _message('Importación completada: ${counts.values.fold<int>(0, (sum, value) => sum + value)} registros.');
     } catch (error) { if (mounted) _message(friendlyError(error)); } finally { if (mounted) setState(() => busy = false); }
   }
 

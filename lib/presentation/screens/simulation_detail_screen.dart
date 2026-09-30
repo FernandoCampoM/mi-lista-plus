@@ -51,9 +51,7 @@ class SimulationDetailScreen extends StatelessWidget {
                         ),
                       );
                     }
-                  }
-
-                  if (value == 'delete') {
+                  } else if (value == 'delete') {
                     final confirmed = await confirmAction(
                       context,
                       title: '¿Eliminar la simulación?',

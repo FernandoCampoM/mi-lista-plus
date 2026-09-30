@@ -46,7 +46,7 @@ class CustomersScreen extends StatelessWidget {
                 );
               },
               icon: const Icon(Icons.sync_alt),
-            )],
+            ),],
           ),
           const Material(
             color: Colors.white,
@@ -54,7 +54,7 @@ class CustomersScreen extends StatelessWidget {
               Tab(icon: Icon(Icons.people_outline), text: 'Clientes'),
               Tab(icon: Icon(Icons.notifications_active_outlined), text: 'Hoy'),
               Tab(icon: Icon(Icons.local_shipping_outlined), text: 'Entregas'),
-            ]),
+            ],),
           ),
           const AdaptiveBannerAd(
             placement: BannerPlacement.customers,
@@ -63,8 +63,8 @@ class CustomersScreen extends StatelessWidget {
           ),
           const Expanded(child: TabBarView(children: [
             _CustomerList(), _FollowUpList(), _PendingDeliveries(),
-          ])),
-        ]),
+          ],),),
+        ],),
       ),
     );
   }
@@ -104,11 +104,11 @@ class _CustomerList extends StatelessWidget {
             label: 'Mayor comprador',
             value: ranked.isEmpty ? '-' : ranked.first.name,
             subtitle: ranked.isEmpty ? null : formatter.money(spent(ranked.first.id)),
-          )),
-        ]),
+          ),),
+        ],),
         const SizedBox(height: 8),
         _Metric(
-          label: 'Cliente mas recurrente',
+          label: 'Cliente más recurrente',
           value: recurrent.isEmpty ? '-' : recurrent.first.name,
           subtitle: recurrent.isEmpty ? null : '${purchasesOf(recurrent.first.id)} compras',
         ),
@@ -119,7 +119,7 @@ class _CustomerList extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         if (active.isEmpty)
-          const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Aun no hay clientes registrados.')))
+          const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Aún no hay clientes registrados.')))
         else
           ...ranked.map((customer) {
             final purchases = purchasesOf(customer.id);
@@ -180,7 +180,7 @@ class _CustomerList extends StatelessWidget {
                     MaterialPageRoute<void>(builder: (_) => CustomerProfileScreen(customerId: customer.id)),
                   ),
                 ),
-              )),
+              ),),
         ],
         ],
       ),
@@ -239,7 +239,7 @@ class _CustomerList extends StatelessWidget {
         title: const Text('Pausar seguimiento'),
         content: TextField(controller: reason, decoration: const InputDecoration(labelText: 'Motivo opcional')),
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('CANCELAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('PAUSAR'))],
-      )) ?? false;
+      ),) ?? false;
       if (confirmed) await state.pauseCustomerFollowUp(customer, reason: reason.text);
       Future<void>.delayed(
         const Duration(milliseconds: 400),
@@ -297,9 +297,9 @@ class _CustomerList extends StatelessWidget {
             if (customer.allowCalls) Expanded(child: OutlinedButton.icon(onPressed: () => launchUrl(Uri(scheme: 'tel', path: customer.normalizedPhone)), icon: const Icon(Icons.call_outlined), label: const Text('LLAMAR'))),
             if (customer.allowCalls && customer.allowWhatsApp) const SizedBox(width: 8),
             if (customer.allowWhatsApp) Expanded(child: OutlinedButton.icon(onPressed: () => _openWhatsApp(customer, FollowUpMessageTemplates.message(FollowUpType.periodic, customer.name)), icon: const Icon(Icons.chat_outlined), label: const Text('WHATSAPP'))),
-          ]),
-        ]),
-      )),
+          ],),
+        ],),
+      ),),
     );
   }
 }
@@ -392,7 +392,7 @@ class _FollowUpSection extends StatelessWidget {
           ),
         );
       }),
-    ]);
+    ],);
   }
 }
 

@@ -205,6 +205,7 @@ class LocalStore {
         .toList();
   }
 
+  @Deprecated('Escribe solo en Hive, sin movimientos ni snapshots de SQLite. Usa saveSalesAndInventory.')
   Future<void> registerSale(
     String countryCode,
     List<InventoryItem> inventory,

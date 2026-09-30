@@ -385,7 +385,7 @@ class AppState extends ChangeNotifier {
             customerId: customerId,
             delivered: delivered,
             deliveredAt: deliveredAt,
-          ));
+          ),);
 
   Future<Sale> _registerSale({
     required String customerName,
@@ -550,7 +550,7 @@ class AppState extends ChangeNotifier {
             customerId: customerId,
             delivered: delivered,
             deliveredAt: deliveredAt,
-          ));
+          ),);
 
   Future<Sale> _updateSale({
     required Sale originalSale,
@@ -796,7 +796,9 @@ class AppState extends ChangeNotifier {
     final numbersById = <String, int>{};
     for (final sale in chronological) {
       if (sale.number > 0) continue;
-      while (used.contains(candidate)) candidate++;
+      while (used.contains(candidate)) {
+        candidate++;
+      }
       numbersById[sale.id] = candidate;
       used.add(candidate);
       candidate++;
@@ -988,7 +990,7 @@ class AppState extends ChangeNotifier {
           !customer.hasActiveConsent) {
         changes.addAll(currentPending.map(
           (item) => item.copyWith(status: FollowUpStatus.cancelled),
-        ));
+        ),);
         continue;
       }
       final today = DateTime(now.year, now.month, now.day);
@@ -998,7 +1000,7 @@ class AppState extends ChangeNotifier {
       }
       final completedThisYear = customerBirthdays.any((item) =>
           item.dueAt.year == now.year &&
-          item.status == FollowUpStatus.completed);
+          item.status == FollowUpStatus.completed,);
       if (completedThisYear && due.year == now.year) {
         due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
       }
@@ -1053,7 +1055,7 @@ class AppState extends ChangeNotifier {
       consentAt: now, consentScopes: const {
         ConsentScope.phone, ConsentScope.birthday, ConsentScope.goals, ConsentScope.notes,
       }, createdAt: now, updatedAt: now,
-    ));
+    ),);
   }
 
   Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) =>
@@ -1061,12 +1063,12 @@ class AppState extends ChangeNotifier {
     await saveCustomer(customer.copyWith(
       followUpEnabled: false, followUpPausedUntil: until,
       followUpPauseReason: reason ?? '',
-    ));
+    ),);
     final db = _operationalDatabase;
     if (db != null) {
       await db.saveFollowUps(followUps
           .where((item) => item.customerId == customer.id && item.status == FollowUpStatus.pending)
-          .map((item) => item.copyWith(status: FollowUpStatus.paused)));
+          .map((item) => item.copyWith(status: FollowUpStatus.paused)),);
       await _reloadCrm();
       notifyListeners();
     }
@@ -1083,7 +1085,7 @@ class AppState extends ChangeNotifier {
           .map((item) => item.copyWith(
                 status: FollowUpStatus.pending,
                 dueAt: fromToday && item.dueAt.isBefore(now) ? now : item.dueAt,
-              )));
+              ),),);
       await _reloadCrm();
       notifyListeners();
     }
@@ -1101,7 +1103,7 @@ class AppState extends ChangeNotifier {
       status: FollowUpStatus.completed,
       completedAt: completedAt,
       notes: notes.trim(),
-    ));
+    ),);
     if (db != null && notes.trim().isNotEmpty) {
       await db.saveFollowUpNote(FollowUpNote(
         id: _uuid.v4(),
@@ -1114,7 +1116,7 @@ class AppState extends ChangeNotifier {
         contactMethod: contactMethod,
         deviceId: db.deviceId,
         createdAt: completedAt,
-      ));
+      ),);
     }
     await _reloadCrm();
     if (item.type == FollowUpType.birthday) {
@@ -1155,7 +1157,7 @@ class AppState extends ChangeNotifier {
       contactMethod: contactMethod,
       deviceId: db.deviceId,
       createdAt: DateTime.now(),
-    ));
+    ),);
     followUpNotes = await db.loadFollowUpNotes();
     notifyListeners();
   }
@@ -1300,7 +1302,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     final existing = followUps.where((item) =>
-        item.saleId == sale.id && item.status != FollowUpStatus.cancelled).toList();
+        item.saleId == sale.id && item.status != FollowUpStatus.cancelled,).toList();
     if (existing.isNotEmpty) {
       await _rescheduleSaleFollowUps(sale, existing);
       return;
@@ -1331,7 +1333,7 @@ class AppState extends ChangeNotifier {
           quantity: saleItem.quantity,
         ),
         createdAt: now,
-      ));
+      ),);
     }
     await db.saveFollowUps(items);
     await _reloadCrm();
@@ -1339,7 +1341,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _cancelPendingFollowUpsForSale(String saleId) async {
     final pending = followUps.where((item) =>
-        item.saleId == saleId && item.status == FollowUpStatus.pending);
+        item.saleId == saleId && item.status == FollowUpStatus.pending,);
     await _operationalDatabase?.saveFollowUps(
       pending.map((item) => item.copyWith(status: FollowUpStatus.cancelled)),
     );

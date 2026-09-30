@@ -197,7 +197,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                                       ),
                                     ),
                                   ),
-                                ))
+                                ),)
                             .toList(),
                         items: customerOptions
                             .map(
@@ -223,8 +223,8 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                                           option.statusLabel,
                                           softWrap: true,
                                           style: TextStyle(fontSize: 11, color: _customerStatusColor(option)),
-                                        )),
-                                      ]),
+                                        ),),
+                                      ],),
                                     ],
                                   ),
                                 ),
@@ -257,8 +257,8 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                     Expanded(child: Text(
                       selectedCustomerOption.statusLabel,
                       style: TextStyle(color: _customerStatusColor(selectedCustomerOption), fontSize: 12, fontWeight: FontWeight.w700),
-                    )),
-                  ]),
+                    ),),
+                  ],),
                 ],
                 if (customerWarning != null) ...[
                   const SizedBox(height: 7),
@@ -366,7 +366,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                   title: const Text('El cliente ya recibio el pedido'),
                   subtitle: Text(delivered
                       ? 'Entrega: ${_shortDate(deliveredAt ?? DateTime.now())}'
-                      : 'Quedara en Por confirmar entrega'),
+                      : 'Quedara en Por confirmar entrega',),
                   value: delivered,
                   onChanged: (value) => setState(() {
                     delivered = value;
@@ -616,7 +616,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         original == null
             ? ImportantAdAction.saleRegistered
             : ImportantAdAction.saleUpdated,
-      ));
+      ),);
     } catch (error) {
       if (!mounted) return;
       setState(() => saving = false);

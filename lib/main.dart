@@ -387,7 +387,7 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
                 await widget.state.refreshCatalog(countryToRefresh);
               }
             })
-            .catchError((_) {}));
+            .catchError((_) {}),);
       }
       final noticeService = StartupNoticeService(
         FirebaseRemoteConfig.instance,
@@ -398,7 +398,7 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       );
       if (notice != null && !modalOpen && mounted) {
         final context = appNavigatorKey.currentContext;
-        if (context == null) return;
+        if (context == null || !context.mounted) return;
         await showDialog<void>(
           context: context,
           builder: (dialogContext) {
@@ -500,7 +500,7 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
     if (followUp == null) {
       await appNavigatorKey.currentState?.push(MaterialPageRoute<void>(
         builder: (_) => const CustomersScreen(initialIndex: 1),
-      ));
+      ),);
       return;
     }
     modalOpen = true;

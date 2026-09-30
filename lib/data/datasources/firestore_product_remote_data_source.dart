@@ -101,7 +101,7 @@ class FirestoreProductRemoteDataSource {
           .map((key, value) => MapEntry(
                 int.parse(key),
                 (value as num).toDouble(),
-              )),
+              ),),
       description: data['description'] as String?,
     );
   }

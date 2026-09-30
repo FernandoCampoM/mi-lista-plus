@@ -225,7 +225,7 @@ class _CategoryBanner extends StatelessWidget {
               Text(
                 subtitle,
                 style: TextStyle(
-                  color: Colors.white.withOpacity(.65),
+                  color: Colors.white.withValues(alpha: .65),
                   fontWeight: FontWeight.w900,
                   fontSize: 34,
                 ),

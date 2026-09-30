@@ -154,7 +154,7 @@ class _CountryScreenState extends State<CountryScreen> {
                               backgroundColor: AppColors.purple,
                               foregroundColor: Colors.white,
                               disabledBackgroundColor:
-                                  AppColors.purple.withOpacity(.45),
+                                  AppColors.purple.withValues(alpha: .45),
                               minimumSize: const Size.fromHeight(54),
                             ),
                             child: Text('${country.flagEmoji}  ${country.name}'),

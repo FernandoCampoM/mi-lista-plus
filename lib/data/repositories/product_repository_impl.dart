@@ -51,6 +51,7 @@ class ProductRepositoryImpl implements ProductRepository {
     return _localStore.loadProducts(countryCode);
   }
 
+  @Deprecated('Sin uso en la app; se conserva por compatibilidad.')
   Future<List<Product>> loadProductsWithFallback(String countryCode) async {
     var products = await loadProducts(countryCode);
     if (products.isNotEmpty || countryCode == defaultCountryCode) {
@@ -62,6 +63,7 @@ class ProductRepositoryImpl implements ProductRepository {
     return products;
   }
 
+  @Deprecated('Sin uso en la app; se conserva por compatibilidad.')
   Future<bool> hasProducts(String countryCode) async {
     if (_localStore.loadProducts(countryCode).isNotEmpty) return true;
     if (!_remoteDataSource.isAvailable) return false;
@@ -245,11 +247,13 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
+  @Deprecated('Escribe solo en Hive, sin movimientos ni snapshots de SQLite. Usa saveSalesAndInventory.')
   Future<void> registerSale(
     String countryCode,
     List<InventoryItem> inventory,
     Sale sale,
   ) {
+    // ignore: deprecated_member_use_from_same_package
     return _localStore.registerSale(countryCode, inventory, sale);
   }
 

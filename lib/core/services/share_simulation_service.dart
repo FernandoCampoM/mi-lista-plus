@@ -33,10 +33,34 @@ class ShareSimulationService {
       country: country,
     );
 
-    final tempDir = await Directory.systemTemp.createTemp('mi_lista_plus_share_');
+    await _deletePreviousShareDirectories();
+    final tempDir = await Directory.systemTemp.createTemp(_shareDirPrefix);
     final file = File('${tempDir.path}/simulacion_${simulation.id}.png');
     await file.writeAsBytes(bytes, flush: true);
     return XFile(file.path, mimeType: 'image/png', name: 'simulacion_${simulation.id}.png');
+  }
+
+  // ── NUEVO: limpieza de imágenes compartidas anteriores ──────────────────
+  // Propósito: borrar las carpetas temporales de compartidos previos, que
+  //            antes se acumulaban (PNG a pixelRatio 3).
+  // Depende de: el prefijo de carpeta usado por buildImageFile.
+  // No modifica: la imagen que se está compartiendo ahora.
+  static const _shareDirPrefix = 'mi_lista_plus_share_';
+
+  static Future<void> _deletePreviousShareDirectories() async {
+    try {
+      final entries = Directory.systemTemp.listSync().whereType<Directory>();
+      for (final directory in entries) {
+        final name = directory.uri.pathSegments
+            .where((segment) => segment.isNotEmpty)
+            .last;
+        if (name.startsWith(_shareDirPrefix)) {
+          await directory.delete(recursive: true);
+        }
+      }
+    } catch (_) {
+      // La limpieza nunca debe impedir compartir.
+    }
   }
 
   static Future<void> shareAsImage({

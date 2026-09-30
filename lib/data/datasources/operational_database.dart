@@ -135,11 +135,13 @@ class OperationalDatabase {
 
   Future<int?> configuredDurationDays(String productId, String countryCode, ProductCategory category) async {
     final rows = await _database.query('product_follow_up_config', where: 'product_id = ? AND country_code = ?', whereArgs: [productId, countryCode], limit: 1);
-    if (rows.isEmpty) return switch (category) {
+    if (rows.isEmpty) {
+      return switch (category) {
       ProductCategory.nutrition => 10,
       ProductCategory.beauty => 180,
       ProductCategory.kit => 10,
     };
+    }
     if ((rows.first['enabled'] as num).toInt() == 0) return null;
     final value = (rows.first['duration_value'] as num).toInt();
     return rows.first['duration_unit'] == 'months' ? value * 30 : value;
@@ -151,7 +153,7 @@ class OperationalDatabase {
       'product_id': productId, 'country_code': countryCode,
       'enabled': enabled ? 1 : 0, 'duration_unit': 'days',
       'duration_value': days, 'updated_at': DateTime.now().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }, conflictAlgorithm: ConflictAlgorithm.replace,);
   }
 
   Future<void> _migrateFromHive(LocalStore hive) async {
@@ -176,7 +178,7 @@ class OperationalDatabase {
             await txn.insert('snapshots', {
               'module': module, 'country_code': country.code,
               'payload': payload, 'updated_at': DateTime.now().toIso8601String(),
-            }, conflictAlgorithm: ConflictAlgorithm.replace);
+            }, conflictAlgorithm: ConflictAlgorithm.replace,);
           }
         }
         for (final item in hive.loadInventory(country.code)) {
@@ -187,7 +189,7 @@ class OperationalDatabase {
               quantityDelta: item.quantity, occurredAt: DateTime.now(),
               deviceId: deviceId, reason: 'Migracion inicial desde Hive',
             ),
-          ));
+          ),);
         }
         final migratedStock = await _stockWithExecutor(txn, country.code);
         final hiveStock = {for (final item in hive.loadInventory(country.code)) item.product.id: item.quantity};
@@ -232,7 +234,7 @@ class OperationalDatabase {
     await _database.insert('snapshots', {
       'module': module, 'country_code': countryCode, 'payload': payload,
       'updated_at': DateTime.now().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }, conflictAlgorithm: ConflictAlgorithm.replace,);
   }
 
   Future<Map<String, int>> stock(String countryCode) => _stockWithExecutor(_database, countryCode);
@@ -254,7 +256,7 @@ class OperationalDatabase {
           id: _uuid.v4(), productId: id, countryCode: countryCode,
           type: type, quantityDelta: delta, occurredAt: DateTime.now(),
           deviceId: deviceId, relatedId: relatedId, reason: reason,
-        )));
+        ),),);
       }
     });
   }
@@ -291,7 +293,7 @@ class OperationalDatabase {
             id: _uuid.v4(), productId: id, countryCode: countryCode,
             type: type, quantityDelta: delta, occurredAt: DateTime.now(),
             deviceId: deviceId, relatedId: relatedId, reason: reason,
-          )));
+          ),),);
         }
       }
       final updatedAt = DateTime.now().toIso8601String();
@@ -299,7 +301,7 @@ class OperationalDatabase {
         await txn.insert('snapshots', {
           'module': entry.key, 'country_code': countryCode,
           'payload': entry.value, 'updated_at': updatedAt,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }, conflictAlgorithm: ConflictAlgorithm.replace,);
       }
     });
   }
@@ -326,7 +328,7 @@ class OperationalDatabase {
       'normalized_phone': customer.normalizedPhone,
       'archived_at': customer.archivedAt?.toIso8601String(),
       'updated_at': customer.updatedAt.toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }, conflictAlgorithm: ConflictAlgorithm.replace,);
   }
 
   Future<List<FollowUp>> loadFollowUps() async {
@@ -339,7 +341,7 @@ class OperationalDatabase {
       'id': item.id, 'customer_id': item.customerId, 'sale_id': item.saleId,
       'due_at': item.dueAt.toIso8601String(), 'status': item.status.name,
       'payload': jsonEncode(item.toJson()),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }, conflictAlgorithm: ConflictAlgorithm.replace,);
   }
 
   Future<void> saveFollowUps(Iterable<FollowUp> items) async {
@@ -349,7 +351,7 @@ class OperationalDatabase {
           'id': item.id, 'customer_id': item.customerId, 'sale_id': item.saleId,
           'due_at': item.dueAt.toIso8601String(), 'status': item.status.name,
           'payload': jsonEncode(item.toJson()),
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }, conflictAlgorithm: ConflictAlgorithm.replace,);
       }
     });
   }
@@ -363,7 +365,7 @@ class OperationalDatabase {
     );
     return rows
         .map((row) => FollowUpNote.fromJson(
-            jsonDecode(row['payload'] as String) as Map<String, dynamic>))
+            jsonDecode(row['payload'] as String) as Map<String, dynamic>,),)
         .toList();
   }
 
@@ -412,12 +414,12 @@ class OperationalDatabase {
           'created_at': note.createdAt.toIso8601String(),
           'updated_at': null,
           'payload': jsonEncode(note.toJson()),
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }, conflictAlgorithm: ConflictAlgorithm.ignore,);
       }
       await txn.insert('metadata', {
         'key': 'follow_up_notes_migrated',
         'value': '1',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }, conflictAlgorithm: ConflictAlgorithm.replace,);
     });
   }
 

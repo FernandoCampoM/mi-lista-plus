@@ -53,7 +53,7 @@ class AppHeader extends StatelessWidget {
             onPressed: showBack ? () => Navigator.pop(context) : () => _openAppMenu(context),
             icon: Icon(showBack ? Icons.arrow_back : Icons.menu),
             style: IconButton.styleFrom(
-              backgroundColor: Colors.white.withOpacity(.13),
+              backgroundColor: Colors.white.withValues(alpha: .13),
               foregroundColor: Colors.white,
             ),
           ),
@@ -112,7 +112,7 @@ class AppHeader extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
-                  color: AppColors.deepPurple.withOpacity(.35),
+                  color: AppColors.deepPurple.withValues(alpha: .35),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(

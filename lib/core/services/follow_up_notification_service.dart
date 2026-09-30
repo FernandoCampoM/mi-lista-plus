@@ -323,7 +323,7 @@ class FollowUpNotificationService {
     android: AndroidNotificationDetails(
       _followUpChannelId,
       'Seguimientos',
-      channelDescription: 'Recordatorios de clientes, entregas y reposicion',
+      channelDescription: 'Recordatorios de clientes, entregas y reposición',
       icon: 'ic_notification',
       largeIcon: DrawableResourceAndroidBitmap('ic_notification_large'),
       importance: Importance.high,
