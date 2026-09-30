@@ -97,6 +97,23 @@ class OperationalDatabase {
   Future<String?> get migrationError async =>
       _metadata(_database, 'hive_migration_error');
 
+  // ── NUEVO: clave local para respaldos automáticos ───────────────────────
+  // Propósito: cifrar el respaldo previo a una importación con una clave
+  //            propia del dispositivo, no con la del archivo entrante.
+  // Depende de: tabla metadata (clave local_backup_secret).
+  // No modifica: ninguna clave de metadata existente.
+  Future<String> localBackupSecret() async {
+    final existing = await _metadata(_database, 'local_backup_secret');
+    if (existing != null && existing.length >= 8) return existing;
+    final secret = '${_uuid.v4()}${_uuid.v4()}';
+    await _database.insert(
+      'metadata',
+      {'key': 'local_backup_secret', 'value': secret},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    return secret;
+  }
+
   Future<int> get reminderHour async => int.tryParse(await _metadata(_database, 'reminder_hour') ?? '') ?? 9;
 
   Future<int> get monthlyPointsGoal async =>

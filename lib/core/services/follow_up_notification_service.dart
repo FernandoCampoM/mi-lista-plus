@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -13,6 +14,20 @@ import '../../domain/entities/follow_up.dart';
 import 'follow_up_message_templates.dart';
 
 class FollowUpNotificationService {
+  // ── NUEVO: constructor con preferencias opcionales ──────────────────────
+  // Propósito: recordar entre aperturas cuándo se avisó de los vencidos.
+  // Compatibilidad: FollowUpNotificationService() sigue siendo válido; sin
+  //                 preferencias, el recuerdo solo dura la sesión.
+  FollowUpNotificationService({SharedPreferences? preferences})
+      : _preferences = preferences;
+
+  // CAMPO NUEVO: _preferences
+  // Motivo: persistir el último aviso de vencidos.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  final SharedPreferences? _preferences;
+  static const _dueNoticeKey = 'follow_up_due_notice';
+  String? _dueNoticeInMemory;
+
   static const _channel = MethodChannel('mi_lista_plus/settings');
   static const _followUpChannelId = 'follow_up';
   static const _summaryId = 2147483001;
@@ -122,7 +137,6 @@ class FollowUpNotificationService {
     int reminderHour = 9,
   }) async {
     if (!_initialized || !await notificationsAllowed()) return;
-    await _cancelFollowUpNotificationsOnly();
     final customersById = {for (final customer in customers) customer.id: customer};
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -156,7 +170,14 @@ class FollowUpNotificationService {
       );
       return date.isBefore(today) || (date == today && !scheduled.isAfter(now));
     }).toList();
-    if (dueNow.isNotEmpty) {
+    // Antes se volvía a mostrar el aviso de vencidos con casi cualquier acción
+    // del CRM. Ahora solo se muestra si no se avisó hoy o si hay un vencido nuevo.
+    final showDueNotice = _shouldShowDueNotice(dueNow, today);
+    await _cancelFollowUpNotificationsOnly(
+      cancelSummary: dueNow.isEmpty || showDueNotice,
+    );
+    if (dueNow.isNotEmpty && showDueNotice) {
+      await _rememberDueNotice(dueNow, today);
       final first = dueNow.first;
       await _plugin.show(
         dueNow.length == 1 ? assignedIds[first.id]! : _summaryId,
@@ -206,12 +227,61 @@ class FollowUpNotificationService {
     }
   }
 
-  Future<void> _cancelFollowUpNotificationsOnly() async {
+  Future<void> _cancelFollowUpNotificationsOnly({bool cancelSummary = true}) async {
     final pending = await _plugin.pendingNotificationRequests();
     for (final item in pending.where((entry) => _isFollowUpPayload(entry.payload))) {
       await _plugin.cancel(item.id);
     }
-    await _plugin.cancel(_summaryId);
+    if (cancelSummary) await _plugin.cancel(_summaryId);
+  }
+
+  // ── NUEVO: control del aviso diario de vencidos ─────────────────────────
+  // Propósito: decidir si el aviso de seguimientos vencidos debe mostrarse.
+  // Depende de: _preferences (opcional) y dueNoticeDecision.
+  // No modifica: la programación de notificaciones futuras.
+  bool _shouldShowDueNotice(List<FollowUp> dueNow, DateTime today) {
+    if (dueNow.isEmpty) return false;
+    final stored = _preferences?.getString(_dueNoticeKey) ?? _dueNoticeInMemory;
+    return dueNoticeDecision(
+      stored: stored,
+      today: today,
+      dueIds: dueNow.map((item) => item.id),
+    );
+  }
+
+  Future<void> _rememberDueNotice(List<FollowUp> dueNow, DateTime today) async {
+    final value = encodeDueNotice(today, dueNow.map((item) => item.id));
+    _dueNoticeInMemory = value;
+    try {
+      await _preferences?.setString(_dueNoticeKey, value);
+    } catch (_) {
+      // Si no se puede guardar, el recuerdo en memoria evita repetir en la sesión.
+    }
+  }
+
+  static String _dayKey(DateTime day) =>
+      '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+
+  @visibleForTesting
+  static String encodeDueNotice(DateTime today, Iterable<String> ids) =>
+      jsonEncode({'day': _dayKey(today), 'ids': ids.toList()..sort()});
+
+  /// Verdadero si hoy no se avisó todavía o si aparece un vencido nuevo.
+  @visibleForTesting
+  static bool dueNoticeDecision({
+    required String? stored,
+    required DateTime today,
+    required Iterable<String> dueIds,
+  }) {
+    if (stored == null) return true;
+    try {
+      final value = jsonDecode(stored) as Map<String, dynamic>;
+      if (value['day'] != _dayKey(today)) return true;
+      final shown = (value['ids'] as List<dynamic>).cast<String>().toSet();
+      return dueIds.any((id) => !shown.contains(id));
+    } catch (_) {
+      return true;
+    }
   }
 
   static bool _isFollowUpPayload(String? payload) {

@@ -81,11 +81,12 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
           return const SizedBox.shrink();
         }
 
+        // Se usa la altura real del anuncio: la política de AdMob no permite
+        // recortarlo. maxHeight se conserva por compatibilidad pero ya no corta.
         return Container(
           width: double.infinity,
-          height: adSize.height.toDouble().clamp(0, widget.maxHeight).toDouble(),
+          height: adSize.height.toDouble(),
           margin: widget.margin,
-          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
           child: AdWidget(ad: bannerAd),
         );

@@ -76,7 +76,9 @@ class _BootstrapRootState extends State<_BootstrapRoot> {
     final box = await boxFuture;
     _timing('Hive/SharedPreferences', hiveWatch);
     final localStore = LocalStore(preferences, box);
-    final notificationService = FollowUpNotificationService();
+    final notificationService = FollowUpNotificationService(
+      preferences: preferences,
+    );
 
     // Inicio local-first:
     // 1) si Hive ya tiene catálogo, no esperamos red para mostrar la app;
