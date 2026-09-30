@@ -10,11 +10,13 @@ import '../../domain/entities/simulation.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../widgets/app_header.dart';
+import '../widgets/confirm_action_dialog.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
 import 'cart_screen.dart';
 import 'register_sale_screen.dart';
 import 'sale_detail_screen.dart';
+import '../../core/errors/friendly_error.dart';
 
 class SimulationDetailScreen extends StatelessWidget {
   const SimulationDetailScreen({required this.simulation, super.key});
@@ -52,6 +54,13 @@ class SimulationDetailScreen extends StatelessWidget {
                   }
 
                   if (value == 'delete') {
+                    final confirmed = await confirmAction(
+                      context,
+                      title: '¿Eliminar la simulación?',
+                      message: 'Esta acción no se puede deshacer.',
+                      confirmLabel: 'ELIMINAR',
+                    );
+                    if (!confirmed || !context.mounted) return;
                     await state.deleteSimulation(simulation);
                     if (context.mounted) {
                       Navigator.pop(context);
@@ -232,7 +241,7 @@ class SimulationDetailScreen extends StatelessWidget {
     } catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
+        SnackBar(content: Text(friendlyError(error))),
       );
     }
   }

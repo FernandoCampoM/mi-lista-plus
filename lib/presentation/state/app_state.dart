@@ -17,6 +17,7 @@ import '../../data/datasources/operational_database.dart';
 import '../../data/repositories/product_repository_impl.dart';
 import '../../core/services/follow_up_notification_service.dart';
 import '../../core/services/encrypted_backup_service.dart';
+import '../../core/errors/friendly_error.dart';
 
 enum HomeTab { products, simulations }
 
@@ -150,7 +151,7 @@ class AppState extends ChangeNotifier {
     try {
       await _repository.syncProductsIfNeeded(country.code);
     } catch (error) {
-      errorMessage = error.toString();
+      errorMessage = friendlyError(error);
     }
 
     final loadedProducts = await _repository.loadProducts(country.code);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -12,6 +14,7 @@ import '../widgets/app_header.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/product_avatar.dart';
 import '../widgets/product_sort_control.dart';
+import '../../core/errors/friendly_error.dart';
 
 class InventoryEditorScreen extends StatefulWidget {
   const InventoryEditorScreen({super.key});
@@ -175,20 +178,19 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
 
   Future<void> _save() async {
     setState(() => saving = true);
+    final ads = AppScope.adsOf(context);
     try {
       await AppScope.of(context).saveInventoryQuantities(quantities);
       dirty = false;
-      if (mounted) {
-        await AppScope.adsOf(context).recordImportantAction(
-          ImportantAdAction.inventoryUpdated,
-        );
-      }
+      // Primero se cierra la pantalla y después, sin esperar, el anuncio:
+      // así el usuario ve que el inventario quedó guardado.
       if (mounted) Navigator.pop(context);
+      unawaited(ads.recordImportantAction(ImportantAdAction.inventoryUpdated));
     } catch (error) {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo guardar el inventario: $error')),
+        SnackBar(content: Text('No se pudo guardar el inventario: ${friendlyError(error)}')),
       );
     }
   }

@@ -11,6 +11,7 @@ import '../widgets/product_avatar.dart';
 import '../widgets/quantity_control.dart';
 import 'discount_screen.dart';
 import 'simulation_success_screen.dart';
+import '../../core/errors/friendly_error.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
@@ -210,10 +211,12 @@ class _CartScreenState extends State<CartScreen> {
 
     try {
       state.setDiscount(discount);
+      // Se captura antes del await para no usar context tras un hueco async.
+      final ads = AppScope.adsOf(context);
       final simulation = await state.createSimulation(
         customerName: customerNameController.text,
       );
-      await AppScope.adsOf(context).recordImportantAction(
+      await ads.recordImportantAction(
         ImportantAdAction.simulationGenerated,
       );
       if (!mounted) return;
@@ -227,7 +230,7 @@ class _CartScreenState extends State<CartScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo guardar: $error')),
+        SnackBar(content: Text('No se pudo guardar: ${friendlyError(error)}')),
       );
     }
   }

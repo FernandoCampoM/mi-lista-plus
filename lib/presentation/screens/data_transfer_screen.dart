@@ -14,6 +14,7 @@ import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import 'follow_up_settings_screen.dart';
+import '../../core/errors/friendly_error.dart';
 
 class DataTransferScreen extends StatefulWidget {
   const DataTransferScreen({super.key});
@@ -162,7 +163,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
             : 'Respaldo guardado correctamente.',
       );
     } catch (error) {
-      if (mounted) _message('No fue posible guardar el respaldo: $error');
+      if (mounted) _message('No fue posible guardar el respaldo: ${friendlyError(error)}');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -290,11 +291,11 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       }
       if (!mounted) return;
       _message('Importacion completada: ${counts.values.fold<int>(0, (sum, value) => sum + value)} registros.');
-    } catch (error) { if (mounted) _message('$error'); } finally { if (mounted) setState(() => busy = false); }
+    } catch (error) { if (mounted) _message(friendlyError(error)); } finally { if (mounted) setState(() => busy = false); }
   }
 
   bool _valid() => modules.isNotEmpty && _validPassword();
   bool _validPassword() { if (password.text.trim().length >= 8) return true; _message('La contraseña debe tener al menos 8 caracteres, sin contar espacios externos.'); return false; }
-  Future<void> _run(Future<void> Function() action, String success) async { setState(() => busy = true); try { await action(); if (mounted) _message(success); } catch (error) { if (mounted) _message('$error'); } finally { if (mounted) setState(() => busy = false); } }
+  Future<void> _run(Future<void> Function() action, String success) async { setState(() => busy = true); try { await action(); if (mounted) _message(success); } catch (error) { if (mounted) _message(friendlyError(error)); } finally { if (mounted) setState(() => busy = false); } }
   void _message(String value) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
 }

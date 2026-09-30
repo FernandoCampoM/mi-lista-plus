@@ -12,10 +12,12 @@ import '../../domain/entities/sale.dart';
 import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
+import '../widgets/confirm_action_dialog.dart';
 import '../widgets/customer_form_dialog.dart';
 import 'data_transfer_screen.dart';
 import 'customer_profile_screen.dart';
 import 'follow_up_detail_sheet.dart';
+import '../../core/errors/friendly_error.dart';
 
 class CustomersScreen extends StatelessWidget {
   const CustomersScreen({this.initialIndex = 0, super.key});
@@ -185,9 +187,26 @@ class _CustomerList extends StatelessWidget {
     if (action == 'edit') {
       await _openCustomerEditor(context, customer: customer);
     } else if (action == 'archive') {
+      final confirmed = await confirmAction(
+        context,
+        title: '¿Archivar a ${customer.name}?',
+        message: 'Se pausarán sus seguimientos y no aparecerá en la lista '
+            'de clientes activos.',
+        confirmLabel: 'ARCHIVAR',
+      );
+      if (!confirmed) return;
       await state.archiveCustomer(customer);
     } else if (action == 'consent') {
       if (customer.hasActiveConsent) {
+        final confirmed = await confirmAction(
+          context,
+          title: '¿Revocar el consentimiento?',
+          message: 'Se cancelarán los seguimientos pendientes de '
+              '${customer.name} y no podrás registrarle ventas nuevas '
+              'hasta reactivarlo.',
+          confirmLabel: 'REVOCAR',
+        );
+        if (!confirmed) return;
         await state.revokeCustomerConsent(customer);
       } else {
         final resume = await _askConsentReactivation(context);
@@ -478,7 +497,7 @@ Future<void> _openCustomerEditor(BuildContext context, {Customer? customer}) asy
   } catch (error) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('No se pudo guardar el cliente: $error')),
+      SnackBar(content: Text('No se pudo guardar el cliente: ${friendlyError(error)}')),
     );
   }
 }
