@@ -552,13 +552,20 @@ class _InventoryOverview extends StatelessWidget {
 
   List<InventoryItem> _inactiveProducts60Days(List<InventoryItem> items, List<Sale> sales) {
     final cutoff = DateTime.now().subtract(const Duration(days: 60));
+    // Una sola pasada por las ventas (antes se recorrían todas por cada
+    // producto en cada reconstrucción, incluso al escribir en la búsqueda).
+    final lastSaleByProduct = <String, DateTime>{};
+    for (final sale in sales.where((sale) => sale.isCompleted)) {
+      for (final line in sale.items) {
+        final previous = lastSaleByProduct[line.productId];
+        if (previous == null || sale.soldAt.isAfter(previous)) {
+          lastSaleByProduct[line.productId] = sale.soldAt;
+        }
+      }
+    }
     final result = <InventoryItem>[];
     for (final item in items.where((item) => item.quantity > 0)) {
-      DateTime? lastSale;
-      for (final sale in sales.where((sale) => sale.isCompleted)) {
-        if (!sale.items.any((line) => line.productId == item.product.id)) continue;
-        if (lastSale == null || sale.soldAt.isAfter(lastSale)) lastSale = sale.soldAt;
-      }
+      final lastSale = lastSaleByProduct[item.product.id];
       if (lastSale == null || lastSale.isBefore(cutoff)) result.add(item);
     }
     result.sort((a, b) => a.product.name.toLowerCase().compareTo(b.product.name.toLowerCase()));

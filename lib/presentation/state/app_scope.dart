@@ -20,7 +20,9 @@ class AppScope extends InheritedNotifier<AppState> {
   }
 
   static AppAdService adsOf(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
+    // El servicio de anuncios nunca cambia de instancia y avisa sus propios
+    // cambios; por eso no se suscribe el widget a cada cambio de AppState.
+    final scope = context.getInheritedWidgetOfExactType<AppScope>();
     assert(scope != null, 'AppScope no esta disponible en el arbol.');
     return scope!.adService;
   }

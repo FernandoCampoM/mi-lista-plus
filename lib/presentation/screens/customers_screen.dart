@@ -78,8 +78,20 @@ class _CustomerList extends StatelessWidget {
     final state = AppScope.of(context);
     final active = state.customers.where((item) => !item.isArchived).toList();
     final formatter = CurrencyFormatter(state.selectedCountry!);
-    final ranked = active.toList()..sort((a, b) => _spent(state.sales, b.id).compareTo(_spent(state.sales, a.id)));
-    final recurrent = active.toList()..sort((a, b) => _purchases(state.sales, b.id).compareTo(_purchases(state.sales, a.id)));
+    // Una sola pasada por las ventas; antes se recorrían todas dentro del
+    // comparador del ordenamiento y otra vez por cada tarjeta.
+    final spentById = <String, double>{};
+    final purchasesById = <String, int>{};
+    for (final sale in state.sales) {
+      final id = sale.customerId;
+      if (id == null || !sale.isCompleted) continue;
+      spentById[id] = (spentById[id] ?? 0) + sale.effectiveReceivedAmount;
+      purchasesById[id] = (purchasesById[id] ?? 0) + 1;
+    }
+    double spent(String id) => spentById[id] ?? 0;
+    int purchasesOf(String id) => purchasesById[id] ?? 0;
+    final ranked = active.toList()..sort((a, b) => spent(b.id).compareTo(spent(a.id)));
+    final recurrent = active.toList()..sort((a, b) => purchasesOf(b.id).compareTo(purchasesOf(a.id)));
     return SafeArea(
       top: false,
       child: ListView(
@@ -91,14 +103,14 @@ class _CustomerList extends StatelessWidget {
           Expanded(child: _Metric(
             label: 'Mayor comprador',
             value: ranked.isEmpty ? '-' : ranked.first.name,
-            subtitle: ranked.isEmpty ? null : formatter.money(_spent(state.sales, ranked.first.id)),
+            subtitle: ranked.isEmpty ? null : formatter.money(spent(ranked.first.id)),
           )),
         ]),
         const SizedBox(height: 8),
         _Metric(
           label: 'Cliente mas recurrente',
           value: recurrent.isEmpty ? '-' : recurrent.first.name,
-          subtitle: recurrent.isEmpty ? null : '${_purchases(state.sales, recurrent.first.id)} compras',
+          subtitle: recurrent.isEmpty ? null : '${purchasesOf(recurrent.first.id)} compras',
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -110,13 +122,13 @@ class _CustomerList extends StatelessWidget {
           const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('Aun no hay clientes registrados.')))
         else
           ...ranked.map((customer) {
-            final purchases = state.sales.where((sale) => sale.customerId == customer.id && sale.isCompleted).length;
+            final purchases = purchasesOf(customer.id);
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 leading: CircleAvatar(child: Text(customer.name.trim().isEmpty ? '?' : customer.name.trim()[0].toUpperCase())),
                 title: Text(customer.name, maxLines: 2, style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text('${customer.normalizedPhone}\n$purchases compras · ${formatter.money(_spent(state.sales, customer.id))}'),
+                subtitle: Text('${customer.normalizedPhone}\n$purchases compras · ${formatter.money(spent(customer.id))}'),
                 isThreeLine: true,
                 trailing: PopupMenuButton<String>(
                   onSelected: (action) => _customerAction(context, customer, action),
@@ -175,10 +187,14 @@ class _CustomerList extends StatelessWidget {
     );
   }
 
+  // Sin uso desde que _CustomerList precalcula los totales; se conserva (no
+  // se elimina código existente sin aprobación).
+  // ignore: unused_element
   static double _spent(List<Sale> sales, String id) => sales
       .where((sale) => sale.customerId == id && sale.isCompleted)
       .fold(0, (sum, sale) => sum + sale.effectiveReceivedAmount);
 
+  // ignore: unused_element
   static int _purchases(List<Sale> sales, String id) =>
       sales.where((sale) => sale.customerId == id && sale.isCompleted).length;
 

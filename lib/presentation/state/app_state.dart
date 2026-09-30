@@ -865,6 +865,39 @@ class AppState extends ChangeNotifier {
     customers = await db.loadCustomers(includeArchived: true);
     followUps = await db.loadFollowUps();
     followUpNotes = await db.loadFollowUpNotes();
+    if (_crmBatchDepth > 0) {
+      // Dentro de una operación compuesta los datos se recargan igual (los
+      // pasos siguientes los necesitan frescos); solo la reprogramación de
+      // notificaciones se hace una vez al final.
+      _notificationsDirty = true;
+      return;
+    }
+    await _rescheduleFromMemory(db);
+  }
+
+  // ── NUEVO: agrupación de recargas del CRM ───────────────────────────────
+  // Propósito: que una operación como archivar un cliente reprograme las
+  //            notificaciones una sola vez en lugar de 3–5 veces.
+  // Depende de: _reloadCrm, FollowUpNotificationService.reschedule.
+  // No modifica: los datos recargados ni el estado final de notificaciones.
+  int _crmBatchDepth = 0;
+  bool _notificationsDirty = false;
+
+  Future<T> _crmBatch<T>(Future<T> Function() action) async {
+    _crmBatchDepth++;
+    try {
+      return await action();
+    } finally {
+      _crmBatchDepth--;
+      final db = _operationalDatabase;
+      if (_crmBatchDepth == 0 && _notificationsDirty && db != null) {
+        _notificationsDirty = false;
+        await _rescheduleFromMemory(db);
+      }
+    }
+  }
+
+  Future<void> _rescheduleFromMemory(OperationalDatabase db) async {
     await _notificationService?.reschedule(
       followUps, customers,
       reminderHour: await db.reminderHour,
@@ -879,7 +912,8 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> attachOperationalDatabase(OperationalDatabase database) async {
+  Future<void> attachOperationalDatabase(OperationalDatabase database) =>
+      _crmBatch(() async {
     if (identical(_operationalDatabase, database)) return;
     _operationalDatabase = database;
     final repository = _repository;
@@ -889,7 +923,7 @@ class AppState extends ChangeNotifier {
     await _reloadCrm();
     await _ensureBirthdayFollowUps();
     notifyListeners();
-  }
+  });
 
   EncryptedBackupService get backupService {
     final db = _operationalDatabase;
@@ -933,12 +967,21 @@ class AppState extends ChangeNotifier {
     if (db == null) return;
     final now = DateTime.now();
     final changes = <FollowUp>[];
+    // Índice de cumpleaños por cliente: evita recorrer todos los seguimientos
+    // por cada cliente (antes O(clientes × seguimientos)).
+    final birthdaysByCustomer = <String, List<FollowUp>>{};
+    for (final item in followUps) {
+      if (item.type == FollowUpType.birthday) {
+        (birthdaysByCustomer[item.customerId] ??= []).add(item);
+      }
+    }
+    final knownIds = {for (final item in followUps) item.id};
     for (final customer in customers) {
       final birthday = customer.birthday;
-      final currentPending = followUps.where((item) =>
-          item.customerId == customer.id &&
-          item.type == FollowUpType.birthday &&
-          item.status == FollowUpStatus.pending);
+      final customerBirthdays =
+          birthdaysByCustomer[customer.id] ?? const <FollowUp>[];
+      final currentPending = customerBirthdays
+          .where((item) => item.status == FollowUpStatus.pending);
       if (birthday == null ||
           customer.isArchived ||
           !customer.birthdayRemindersEnabled ||
@@ -953,9 +996,7 @@ class AppState extends ChangeNotifier {
       if (DateTime(due.year, due.month, due.day).isBefore(today)) {
         due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
       }
-      final completedThisYear = followUps.any((item) =>
-          item.customerId == customer.id &&
-          item.type == FollowUpType.birthday &&
+      final completedThisYear = customerBirthdays.any((item) =>
           item.dueAt.year == now.year &&
           item.status == FollowUpStatus.completed);
       if (completedThisYear && due.year == now.year) {
@@ -967,7 +1008,7 @@ class AppState extends ChangeNotifier {
       for (final item in pending) {
         if (item.dueAt.year == due.year && keep == null) {
           keep = item.dueAt == due ? item : item.copyWith(dueAt: due);
-          if (keep != item) changes.add(keep!);
+          if (keep != item) changes.add(keep);
         } else {
           changes.add(item.copyWith(status: FollowUpStatus.cancelled));
         }
@@ -979,13 +1020,14 @@ class AppState extends ChangeNotifier {
         dueAt: due,
         createdAt: now,
       );
-      if (!followUps.any((item) => item.id == keep!.id)) changes.add(keep!);
+      if (!knownIds.contains(keep.id)) changes.add(keep);
     }
     if (changes.isNotEmpty) await db.saveFollowUps(changes);
     await _reloadCrm();
   }
 
-  Future<Customer> saveCustomer(Customer customer) async {
+  Future<Customer> saveCustomer(Customer customer) =>
+      _crmBatch(() async {
     final db = _operationalDatabase;
     if (db == null) throw StateError('La base local segura no esta disponible.');
     await db.saveCustomer(customer);
@@ -993,7 +1035,7 @@ class AppState extends ChangeNotifier {
     await _ensureBirthdayFollowUps();
     notifyListeners();
     return customer;
-  }
+  });
 
   Future<Customer> createCustomer({
     required String name,
@@ -1014,7 +1056,8 @@ class AppState extends ChangeNotifier {
     ));
   }
 
-  Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) async {
+  Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) =>
+      _crmBatch(() async {
     await saveCustomer(customer.copyWith(
       followUpEnabled: false, followUpPausedUntil: until,
       followUpPauseReason: reason ?? '',
@@ -1027,9 +1070,10 @@ class AppState extends ChangeNotifier {
       await _reloadCrm();
       notifyListeners();
     }
-  }
+  });
 
-  Future<void> resumeCustomerFollowUp(Customer customer, {bool fromToday = true}) async {
+  Future<void> resumeCustomerFollowUp(Customer customer, {bool fromToday = true}) =>
+      _crmBatch(() async {
     await saveCustomer(customer.copyWith(followUpEnabled: true, clearPausedUntil: true));
     final now = DateTime.now();
     final db = _operationalDatabase;
@@ -1043,13 +1087,14 @@ class AppState extends ChangeNotifier {
       await _reloadCrm();
       notifyListeners();
     }
-  }
+  });
 
   Future<void> completeFollowUp(
     FollowUp item, {
     String notes = '',
     FollowUpContactMethod contactMethod = FollowUpContactMethod.other,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     final db = _operationalDatabase;
     final completedAt = DateTime.now();
     await _operationalDatabase?.saveFollowUp(item.copyWith(
@@ -1089,7 +1134,7 @@ class AppState extends ChangeNotifier {
       await _reloadCrm();
     }
     notifyListeners();
-  }
+  });
 
   Future<void> addManualNote({
     required String customerId,
@@ -1142,7 +1187,8 @@ class AppState extends ChangeNotifier {
 
   FollowUpNotificationService? get notificationService => _notificationService;
 
-  Future<void> archiveCustomer(Customer customer, {bool archived = true}) async {
+  Future<void> archiveCustomer(Customer customer, {bool archived = true}) =>
+      _crmBatch(() async {
     final updated = customer.copyWith(
       archivedAt: archived ? DateTime.now() : null,
       clearArchivedAt: !archived,
@@ -1150,21 +1196,23 @@ class AppState extends ChangeNotifier {
     );
     await saveCustomer(updated);
     if (archived) await pauseCustomerFollowUp(updated, reason: 'Cliente archivado');
-  }
+  });
 
-  Future<void> revokeCustomerConsent(Customer customer) async {
+  Future<void> revokeCustomerConsent(Customer customer) =>
+      _crmBatch(() async {
     final revoked = customer.copyWith(
       consentRevokedAt: DateTime.now(), followUpEnabled: false,
       allowCalls: false, allowWhatsApp: false,
     );
     await saveCustomer(revoked);
     await _cancelCustomerFollowUps(customer.id);
-  }
+  });
 
   Future<void> reactivateCustomerConsent(
     Customer customer, {
     bool resumeFollowUp = false,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     final reactivated = customer.copyWith(
       consentAt: DateTime.now(),
       clearConsentRevocation: true,
@@ -1176,7 +1224,7 @@ class AppState extends ChangeNotifier {
     if (resumeFollowUp) {
       await resumeCustomerFollowUp(reactivated, fromToday: true);
     }
-  }
+  });
 
   Future<void> updateCustomerProfile({
     required Customer customer,
@@ -1186,7 +1234,8 @@ class AppState extends ChangeNotifier {
     required String goal,
     required DateTime? birthday,
     required bool consentGranted,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     var updated = customer.copyWith(
       name: name.trim(),
       callingCode: callingCode.trim(),
@@ -1217,7 +1266,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     await saveCustomer(updated);
-  }
+  });
 
   Future<void> confirmDelivery(Sale sale, {DateTime? deliveredAt}) =>
       _serialized(() => _confirmDelivery(sale, deliveredAt: deliveredAt));
