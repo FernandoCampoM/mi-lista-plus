@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +32,33 @@ class LocalStore {
       _ => throw ArgumentError.value(module, 'module'),
     };
     return _box.get('$prefix$countryCode');
+  }
+
+  // ── NUEVO: payloads operativos sin escribir en Hive ─────────────────────
+  // Propósito: generar exactamente el mismo texto JSON que Hive guarda, para
+  //            confirmarlo primero en SQLite y después reflejarlo en Hive.
+  // Depende de: _inventoryItemToJson, _saleToJson y los prefijos existentes.
+  // No modifica: saveInventory, saveSalesAndInventory ni rawOperationalValue.
+  String encodeInventoryPayload(List<InventoryItem> inventory) => jsonEncode(
+        inventory
+            .where((item) => item.quantity > 0)
+            .map(_inventoryItemToJson)
+            .toList(),
+      );
+
+  String encodeSalesPayload(List<Sale> sales) =>
+      jsonEncode(sales.map(_saleToJson).toList());
+
+  Future<void> saveRawOperationalValues(
+    String countryCode, {
+    String? inventoryPayload,
+    String? salesPayload,
+  }) {
+    return _box.putAll({
+      if (inventoryPayload != null)
+        '$_inventoryPrefix$countryCode': inventoryPayload,
+      if (salesPayload != null) '$_salesPrefix$countryCode': salesPayload,
+    });
   }
 
   List<Sale> salesFromPayload(String payload) {
@@ -86,9 +114,22 @@ class LocalStore {
     final raw = _box.get('products_$countryCode');
     if (raw == null) return const [];
     final decoded = jsonDecode(raw) as List<dynamic>;
-    return decoded
-        .map((value) => _productFromJson(value as Map<String, dynamic>))
-        .toList();
+    // El catálogo se puede volver a descargar: un producto dañado se omite en
+    // lugar de impedir que se abra el país. Ventas, inventario y simulaciones
+    // NO se tratan así, porque omitir un registro y volver a guardar lo borraría.
+    final products = <Product>[];
+    for (final value in decoded) {
+      try {
+        products.add(_productFromJson(value as Map<String, dynamic>));
+      } catch (error) {
+        developer.log(
+          'Producto local dañado omitido.',
+          name: 'mi_lista_plus.storage',
+          error: error,
+        );
+      }
+    }
+    return products;
   }
 
   Future<void> saveSimulation(Simulation simulation) async {

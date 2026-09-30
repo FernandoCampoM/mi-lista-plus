@@ -375,11 +375,17 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
         unawaited(remoteRepository
             .syncProductsIfNeeded(countryToRefresh.code)
             .timeout(const Duration(seconds: 8))
-            .then((_) => widget.state.loadCountry(
-                  countryToRefresh,
-                  persist: false,
-                ))
-            .catchError((_) => false));
+            .then((_) async {
+              // Si ya hay un país abierto solo se reemplaza el catálogo: el
+              // carrito y la simulación en edición se conservan. Si la app
+              // arrancó sin catálogo, se carga el país como antes.
+              if (widget.state.selectedCountry == null) {
+                await widget.state.loadCountry(countryToRefresh, persist: false);
+              } else {
+                await widget.state.refreshCatalog(countryToRefresh);
+              }
+            })
+            .catchError((_) {}));
       }
       final noticeService = StartupNoticeService(
         FirebaseRemoteConfig.instance,

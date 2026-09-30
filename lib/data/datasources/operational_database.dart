@@ -242,6 +242,51 @@ class OperationalDatabase {
     });
   }
 
+  // ── NUEVO: guardado atómico de movimientos y snapshots ──────────────────
+  // Propósito: registrar los movimientos de inventario y los snapshots de
+  //            ventas/inventario en UNA sola transacción, para que una
+  //            interrupción no deje stock descontado sin su venta (o al revés).
+  // Depende de: tablas inventory_movements y snapshots, _stockWithExecutor,
+  //            _movementMap.
+  // No modifica: reconcileInventory ni writeSnapshot, que siguen disponibles.
+  Future<void> commitInventoryAndSnapshots(
+    String countryCode, {
+    required List<InventoryItem> desired,
+    required InventoryMovementType type,
+    required Map<String, String> snapshots,
+    bool recordMovements = true,
+    String? relatedId,
+    String? reason,
+  }) async {
+    // Se valida antes de abrir la transacción, igual que writeSnapshot.
+    for (final payload in snapshots.values) {
+      jsonDecode(payload);
+    }
+    final target = {for (final item in desired) item.product.id: item.quantity};
+    await _database.transaction((txn) async {
+      if (recordMovements) {
+        final current = await _stockWithExecutor(txn, countryCode);
+        final ids = {...current.keys, ...target.keys};
+        for (final id in ids) {
+          final delta = (target[id] ?? 0) - (current[id] ?? 0);
+          if (delta == 0) continue;
+          await txn.insert('inventory_movements', _movementMap(InventoryMovement(
+            id: _uuid.v4(), productId: id, countryCode: countryCode,
+            type: type, quantityDelta: delta, occurredAt: DateTime.now(),
+            deviceId: deviceId, relatedId: relatedId, reason: reason,
+          )));
+        }
+      }
+      final updatedAt = DateTime.now().toIso8601String();
+      for (final entry in snapshots.entries) {
+        await txn.insert('snapshots', {
+          'module': entry.key, 'country_code': countryCode,
+          'payload': entry.value, 'updated_at': updatedAt,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
   static Map<String, Object?> _movementMap(InventoryMovement item) => {
         'id': item.id, 'product_id': item.productId, 'country_code': item.countryCode,
         'type': item.type.name, 'quantity_delta': item.quantityDelta,
