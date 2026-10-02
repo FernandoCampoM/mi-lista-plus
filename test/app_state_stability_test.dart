@@ -121,6 +121,29 @@ void main() {
     expect(byId, {first.id: 3, retired.id: 4});
   });
 
+  test('no permite confirmar la entrega de una venta cancelada', () async {
+    final repository = _SlowRepository(
+      products: [first],
+      inventory: [InventoryItem(product: first, quantity: 3)],
+    );
+    final state = AppState(repository);
+    await state.bootstrap();
+    final sale = await state.registerSale(
+      customerName: 'Ana',
+      discountPercent: 40,
+      quantities: {first.id: 1},
+      customerId: 'cliente-1',
+    );
+    await state.cancelSale(sale);
+
+    // La pantalla aún tiene la copia vieja (completada) de la venta.
+    await expectLater(state.confirmDelivery(sale), throwsA(isA<StateError>()));
+
+    expect(state.sales.single.isCompleted, isFalse);
+    expect(state.sales.single.isDelivered, isFalse);
+    expect(repository.sales.single.isCompleted, isFalse);
+  });
+
   test('un fallo al leer datos locales no deja la carga infinita', () async {
     final repository = _SlowRepository(products: [first])..failSales = true;
     final state = AppState(repository);

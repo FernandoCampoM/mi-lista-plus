@@ -1275,7 +1275,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> _confirmDelivery(Sale sale, {DateTime? deliveredAt}) async {
     if (sale.customerId == null) throw StateError('Asocia un cliente antes de confirmar la entrega.');
-    final updated = sale.copyWith(
+    // Se trabaja sobre la venta vigente, no sobre la copia que tenía la
+    // pantalla: así una venta cancelada no se puede entregar y confirmar no
+    // revierte una cancelación hecha después de abrir el detalle.
+    final current = saleById(sale.id);
+    if (current == null || !current.isCompleted) {
+      throw StateError('No se puede confirmar la entrega de una venta cancelada.');
+    }
+    final updated = current.copyWith(
       deliveryStatus: DeliveryStatus.delivered,
       deliveredAt: deliveredAt ?? DateTime.now(),
     );

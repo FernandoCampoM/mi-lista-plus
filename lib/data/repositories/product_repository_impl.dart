@@ -133,9 +133,27 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   Future<void> _saveSimulation(Simulation simulation) async {
-    await _localStore.saveSimulation(simulation);
-    final payload = _localStore.rawOperationalValue('simulations', simulation.countryCode);
-    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', simulation.countryCode, payload);
+    // Se parte de la lista vigente (SQLite si existe). Antes se partía de Hive,
+    // que no incluye lo importado desde un respaldo, y al sobrescribir SQLite
+    // se borraban todas las simulaciones importadas.
+    final current = await loadSimulations(simulation.countryCode);
+    await _writeSimulations(simulation.countryCode, [
+      simulation,
+      ...current.where((item) => item.id != simulation.id),
+    ]);
+  }
+
+  // ── NUEVO: escritura de la lista completa de simulaciones ───────────────
+  // Propósito: guardar la MISMA lista en Hive y en el snapshot de SQLite.
+  // Depende de: LocalStore.saveSimulations, rawOperationalValue, writeSnapshot.
+  // No modifica: el formato persistido de las simulaciones.
+  Future<void> _writeSimulations(
+    String countryCode,
+    List<Simulation> simulations,
+  ) async {
+    await _localStore.saveSimulations(countryCode, simulations);
+    final payload = _localStore.rawOperationalValue('simulations', countryCode);
+    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', countryCode, payload);
   }
 
   @override
@@ -156,9 +174,12 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   Future<void> _deleteSimulation(String countryCode, Set<String> ids) async {
-    await _localStore.deleteSimulations(countryCode, ids);
-    final payload = _localStore.rawOperationalValue('simulations', countryCode);
-    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', countryCode, payload);
+    // Igual que al guardar: se borra sobre la lista vigente, no sobre Hive.
+    final current = await loadSimulations(countryCode);
+    await _writeSimulations(
+      countryCode,
+      current.where((item) => !ids.contains(item.id)).toList(),
+    );
   }
 
   @override
