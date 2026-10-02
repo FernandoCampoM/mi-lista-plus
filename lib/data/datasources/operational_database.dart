@@ -28,7 +28,7 @@ class OperationalDatabase {
     final root = await getApplicationSupportDirectory();
     final database = await openDatabase(
       p.join(root.path, 'mi_lista_plus_operational.sqlite'),
-      version: 2,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
         try {
@@ -49,9 +49,12 @@ class OperationalDatabase {
         await db.execute('CREATE TABLE product_follow_up_config(product_id TEXT NOT NULL, country_code TEXT NOT NULL, enabled INTEGER NOT NULL, duration_unit TEXT NOT NULL, duration_value INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(product_id, country_code))');
         await db.execute('CREATE TABLE sync_history(id TEXT PRIMARY KEY, direction TEXT NOT NULL, modules TEXT NOT NULL, mode TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL, details TEXT)');
         await _createNotesTable(db);
+        await _createSyncOutboxTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) await _createNotesTable(db);
+        // Versión 3: solo AGREGA la cola de sincronización familiar.
+        if (oldVersion < 3) await _createSyncOutboxTable(db);
       },
     );
     var id = await _metadata(database, 'device_id');
@@ -84,6 +87,14 @@ class OperationalDatabase {
     await db.execute('CREATE TABLE IF NOT EXISTS follow_up_notes(id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, follow_up_id TEXT, sale_id TEXT, product_id TEXT, created_at TEXT NOT NULL, updated_at TEXT, payload TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))');
     await db.execute('CREATE INDEX IF NOT EXISTS note_customer_idx ON follow_up_notes(customer_id, created_at DESC)');
     await db.execute('CREATE INDEX IF NOT EXISTS note_follow_up_idx ON follow_up_notes(follow_up_id)');
+  }
+
+  // ── NUEVO: tabla de pendientes de la sincronización familiar ────────────
+  // Propósito: recordar qué ventas y clientes faltan por subir a la nube.
+  // Depende de: nada; es una tabla independiente.
+  // No modifica: ninguna tabla existente (migración 2 → 3 solo la crea).
+  static Future<void> _createSyncOutboxTable(DatabaseExecutor db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS sync_outbox(entity TEXT NOT NULL, entity_id TEXT NOT NULL, country_code TEXT, queued_at TEXT NOT NULL, PRIMARY KEY(entity, entity_id))');
   }
 
   static Future<String?> _metadata(Database db, String key) async {
@@ -305,6 +316,107 @@ class OperationalDatabase {
       }
     });
   }
+
+  // ── NUEVO: soporte de la sincronización familiar ────────────────────────
+  // Propósito: leer/escribir la configuración de sincronización, la cola de
+  //            pendientes y los movimientos de inventario hacia/desde la nube.
+  // Depende de: tablas metadata, sync_outbox e inventory_movements.
+  // No modifica: reconcileInventory, commitInventoryAndSnapshots ni stock().
+  Future<String?> readSetting(String key) => _metadata(_database, key);
+
+  Future<void> writeSetting(String key, String? value) async {
+    if (value == null) {
+      await _database.delete('metadata', where: 'key = ?', whereArgs: [key]);
+      return;
+    }
+    await _database.insert(
+      'metadata',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> enqueueSync(String entity, String entityId, {String? countryCode}) async {
+    await _database.insert('sync_outbox', {
+      'entity': entity, 'entity_id': entityId, 'country_code': countryCode,
+      'queued_at': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Map<String, Object?>>> pendingSync() =>
+      _database.query('sync_outbox', orderBy: 'queued_at ASC');
+
+  /// Quita un pendiente solo si no se volvió a encolar mientras se subía.
+  Future<void> clearSync(String entity, String entityId, String queuedAt) async {
+    await _database.delete(
+      'sync_outbox',
+      where: 'entity = ? AND entity_id = ? AND queued_at = ?',
+      whereArgs: [entity, entityId, queuedAt],
+    );
+  }
+
+  Future<void> clearAllSync() => _database.delete('sync_outbox');
+
+  Future<List<Map<String, Object?>>> unsyncedMovements() =>
+      _database.query('inventory_movements', where: 'synced_at IS NULL');
+
+  Future<void> markMovementsSynced(Iterable<String> ids) async {
+    final syncedAt = DateTime.now().toIso8601String();
+    await _database.transaction((txn) async {
+      for (final id in ids) {
+        await txn.update('inventory_movements', {'synced_at': syncedAt},
+            where: 'id = ?', whereArgs: [id]);
+      }
+    });
+  }
+
+  /// Inserta movimientos que vienen de otro dispositivo. Un id ya existente
+  /// se ignora, así un movimiento nunca se cuenta dos veces.
+  Future<int> insertRemoteMovements(Iterable<Map<String, Object?>> rows) async {
+    var inserted = 0;
+    final syncedAt = DateTime.now().toIso8601String();
+    await _database.transaction((txn) async {
+      for (final row in rows) {
+        final id = await txn.insert(
+          'inventory_movements',
+          {...remoteMovementRow(row), 'synced_at': syncedAt},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        if (id > 0) inserted++;
+      }
+    });
+    return inserted;
+  }
+
+  /// "El principal manda": reemplaza TODOS los movimientos locales por los de
+  /// la nube, en una sola transacción.
+  Future<void> replaceAllMovements(Iterable<Map<String, Object?>> rows) async {
+    final syncedAt = DateTime.now().toIso8601String();
+    await _database.transaction((txn) async {
+      await txn.delete('inventory_movements');
+      for (final row in rows) {
+        await txn.insert(
+          'inventory_movements',
+          {...remoteMovementRow(row), 'synced_at': syncedAt},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    });
+  }
+
+  /// Solo las columnas de inventory_movements, con los tipos que SQLite espera.
+  static Map<String, Object?> remoteMovementRow(Map<String, Object?> row) => {
+        'id': row['id'] as String,
+        'product_id': row['product_id'] as String,
+        'country_code': row['country_code'] as String,
+        'type': row['type'] as String,
+        'quantity_delta': (row['quantity_delta'] as num).toInt(),
+        'occurred_at': row['occurred_at'] as String,
+        'device_id': row['device_id'] as String,
+        'related_id': row['related_id'] as String?,
+        'reason': row['reason'] as String?,
+        'reverses_movement_id': row['reverses_movement_id'] as String?,
+      };
 
   static Map<String, Object?> _movementMap(InventoryMovement item) => {
         'id': item.id, 'product_id': item.productId, 'country_code': item.countryCode,

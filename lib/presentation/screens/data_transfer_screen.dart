@@ -13,6 +13,7 @@ import '../../core/services/encrypted_backup_service.dart';
 import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
+import 'family_sync_screen.dart';
 import 'follow_up_settings_screen.dart';
 import '../../core/errors/friendly_error.dart';
 
@@ -41,6 +42,27 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
     _privacyRequired ??= AppScope.adsOf(context).privacyOptionsRequired();
   }
 
+  // CAMPO NUEVO: _secretTaps / _lastSecretTap
+  // Motivo: contar los toques del acceso oculto.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  int _secretTaps = 0;
+  DateTime? _lastSecretTap;
+
+  void _secretTap() {
+    final now = DateTime.now();
+    final last = _lastSecretTap;
+    _secretTaps = last != null && now.difference(last) < const Duration(seconds: 2)
+        ? _secretTaps + 1
+        : 1;
+    _lastSecretTap = now;
+    if (_secretTaps < 7) return;
+    _secretTaps = 0;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const FamilySyncScreen()),
+    );
+  }
+
   @override void dispose() { password.dispose(); super.dispose(); }
 
   @override Widget build(BuildContext context) => Scaffold(
@@ -53,7 +75,14 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         titleFontSize: 18,
       ),
       Expanded(child: SafeArea(top: false, child: ListView(padding: const EdgeInsets.fromLTRB(18, 18, 18, 28), children: [
-        const Text('Datos incluidos', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+        // ── NUEVO: acceso oculto a la sincronización familiar ───────────
+        // Propósito: abrir FamilySyncScreen tras 7 toques seguidos.
+        // No modifica: el texto ni el diseño visibles de esta sección.
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _secretTap,
+          child: const Text('Datos incluidos', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+        ),
         const Text('Las dependencias necesarias se agregan automáticamente.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 8),
         ...labels.entries.map((entry) => CheckboxListTile(
@@ -282,6 +311,14 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), OutlinedButton(onPressed: () => Navigator.pop(dialogContext, 'merge'), child: const Text('COMBINAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, 'replace'), child: const Text('REEMPLAZAR'))],
       ),);
       if (mode == null || !mounted) return;
+      // Con la sincronización familiar activa, REEMPLAZAR el inventario
+      // borraría los movimientos y desordenaría el de todos los celulares.
+      if (state.cloudSyncActive &&
+          mode == 'replace' &&
+          preview.modules.contains('inventory')) {
+        _message('Con la sincronización familiar activa no se puede REEMPLAZAR el inventario. Usa COMBINAR.');
+        return;
+      }
       final counts = await state.backupService.importPreview(preview, replace: mode == 'replace');
       await state.reloadAfterImport();
       if (mounted) {
