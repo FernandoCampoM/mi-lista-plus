@@ -91,7 +91,7 @@ class _FollowUpDetailState extends State<_FollowUpDetail> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.info_outline, color: AppColors.orange),
               title: Text('La venta historica ya no existe.'),
-              subtitle: Text('No se asociara otra venta automaticamente.'),
+              subtitle: Text('No se asociará otra venta automáticamente.'),
             ),
           if (sale != null) ...[
             Text(
@@ -118,7 +118,7 @@ class _FollowUpDetailState extends State<_FollowUpDetail> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(item.text),
                   subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(item.createdAt)),
-                )),
+                ),),
           ],
           const Divider(height: 28),
           TextField(

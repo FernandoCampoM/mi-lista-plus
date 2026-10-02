@@ -76,7 +76,9 @@ class _BootstrapRootState extends State<_BootstrapRoot> {
     final box = await boxFuture;
     _timing('Hive/SharedPreferences', hiveWatch);
     final localStore = LocalStore(preferences, box);
-    final notificationService = FollowUpNotificationService();
+    final notificationService = FollowUpNotificationService(
+      preferences: preferences,
+    );
 
     // Inicio local-first:
     // 1) si Hive ya tiene catálogo, no esperamos red para mostrar la app;
@@ -375,11 +377,17 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
         unawaited(remoteRepository
             .syncProductsIfNeeded(countryToRefresh.code)
             .timeout(const Duration(seconds: 8))
-            .then((_) => widget.state.loadCountry(
-                  countryToRefresh,
-                  persist: false,
-                ))
-            .catchError((_) => false));
+            .then((_) async {
+              // Si ya hay un país abierto solo se reemplaza el catálogo: el
+              // carrito y la simulación en edición se conservan. Si la app
+              // arrancó sin catálogo, se carga el país como antes.
+              if (widget.state.selectedCountry == null) {
+                await widget.state.loadCountry(countryToRefresh, persist: false);
+              } else {
+                await widget.state.refreshCatalog(countryToRefresh);
+              }
+            })
+            .catchError((_) {}),);
       }
       final noticeService = StartupNoticeService(
         FirebaseRemoteConfig.instance,
@@ -390,7 +398,7 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       );
       if (notice != null && !modalOpen && mounted) {
         final context = appNavigatorKey.currentContext;
-        if (context == null) return;
+        if (context == null || !context.mounted) return;
         await showDialog<void>(
           context: context,
           builder: (dialogContext) {
@@ -492,7 +500,7 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
     if (followUp == null) {
       await appNavigatorKey.currentState?.push(MaterialPageRoute<void>(
         builder: (_) => const CustomersScreen(initialIndex: 1),
-      ));
+      ),);
       return;
     }
     modalOpen = true;

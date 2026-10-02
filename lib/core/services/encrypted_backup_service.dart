@@ -15,6 +15,9 @@ class BackupPreview {
   final DateTime exportedAt;
   final Map<String, int> counts;
   final Map<String, dynamic> payload;
+  // Se conserva por compatibilidad del constructor; el respaldo automático
+  // previo a importar ahora usa la clave local del dispositivo.
+  // ignore: unused_field
   final String _password;
 }
 
@@ -27,11 +30,40 @@ class EncryptedBackupService {
   final _kdf = Argon2id(memory: 19456, parallelism: 1, iterations: 2, hashLength: 32);
 
   static String transferPassword(String pairingCode) {
-    final normalized = pairingCode.trim();
-    if (!RegExp(r'^\d{6}$').hasMatch(normalized)) {
-      throw ArgumentError('El código de emparejamiento debe tener 6 dígitos.');
+    final normalized = normalizePairingCode(pairingCode);
+    if (!isValidPairingCode(normalized)) {
+      throw ArgumentError(
+        'El código de emparejamiento no es válido. Revisa que esté completo.',
+      );
     }
     return 'MLP-SYNC-$normalized';
+  }
+
+  // ── NUEVO: código de emparejamiento de mayor entropía ───────────────────
+  // Propósito: 10 caracteres de 31 símbolos (~49 bits) en lugar de 6 dígitos
+  //            (~20 bits), porque el paquete contiene datos de clientes.
+  // Depende de: Random.secure.
+  // No modifica: transferPassword sigue aceptando códigos de 6 dígitos para
+  //              paquetes generados por versiones anteriores.
+  static const _pairingAlphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+  static String generatePairingCode() {
+    final random = Random.secure();
+    final raw = List.generate(
+      10,
+      (_) => _pairingAlphabet[random.nextInt(_pairingAlphabet.length)],
+    ).join();
+    return '${raw.substring(0, 4)}-${raw.substring(4, 8)}-${raw.substring(8)}';
+  }
+
+  /// Quita espacios y guiones y pasa a mayúsculas.
+  static String normalizePairingCode(String code) =>
+      code.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+
+  static bool isValidPairingCode(String code) {
+    final normalized = normalizePairingCode(code);
+    return RegExp(r'^\d{6}$').hasMatch(normalized) ||
+        RegExp('^[$_pairingAlphabet]{10}\$').hasMatch(normalized);
   }
 
   Future<void> exportToFile({required Set<String> modules, required String password, required String path}) async {
@@ -97,12 +129,42 @@ class EncryptedBackupService {
 
   Future<Map<String, int>> importPreview(BackupPreview preview, {required bool replace}) async {
     final root = await getApplicationSupportDirectory();
-    final path = p.join(root.path, 'automatic_before_import_${DateTime.now().millisecondsSinceEpoch}.mlplus');
+    final path = p.join(root.path, '$_automaticPrefix${DateTime.now().millisecondsSinceEpoch}.mlplus');
+    // Se cifra con la clave propia del dispositivo: la contraseña o el código
+    // del archivo entrante no se conocen después y dejaban el respaldo
+    // prácticamente irrecuperable.
     await exportToFile(
       modules: const {'inventory', 'sales', 'clients', 'followups', 'simulations', 'config'},
-      password: preview._password,
+      password: await database.localBackupSecret(),
       path: path,
     );
+    await _pruneAutomaticBackups(root);
     return database.importModules(preview.payload, replace: replace);
+  }
+
+  // ── NUEVO: rotación de respaldos automáticos ────────────────────────────
+  // Propósito: conservar solo los 3 respaldos automáticos más recientes.
+  // Depende de: el prefijo de nombre usado por importPreview.
+  // No modifica: respaldos manuales ni otros archivos del directorio.
+  static const _automaticPrefix = 'automatic_before_import_';
+  static const _automaticBackupsToKeep = 3;
+
+  Future<void> _pruneAutomaticBackups(Directory root) async {
+    try {
+      final files = root
+          .listSync()
+          .whereType<File>()
+          .where((file) {
+            final name = p.basename(file.path);
+            return name.startsWith(_automaticPrefix) && name.endsWith('.mlplus');
+          })
+          .toList()
+        ..sort((a, b) => p.basename(b.path).compareTo(p.basename(a.path)));
+      for (final file in files.skip(_automaticBackupsToKeep)) {
+        await file.delete();
+      }
+    } catch (_) {
+      // La limpieza nunca debe impedir la importación.
+    }
   }
 }

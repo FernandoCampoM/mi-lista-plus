@@ -1,5 +1,6 @@
 import '../../domain/entities/product.dart';
 
+@Deprecated('Catálogo de ejemplo sin uso: el catálogo real viene de Firestore.')
 final seedProducts = [
   Product(
     id: 'ego-plant-200',
