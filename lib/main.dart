@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'core/constants/app_colors.dart';
 import 'core/services/app_ad_service.dart';
+import 'core/services/cloud_sync_service.dart';
 import 'core/services/connectivity_service.dart';
 import 'core/services/follow_up_notification_service.dart';
 import 'core/services/startup_notice_service.dart';
@@ -264,6 +265,11 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
   String? lastOpenedFollowUpId;
   final Stopwatch homeWatch = Stopwatch()..start();
   bool databaseInitializationStarted = false;
+  // CAMPO NUEVO: _attachedDatabase / _firebaseReady
+  // Motivo: la sincronización familiar arranca cuando ambos están listos.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  OperationalDatabase? _attachedDatabase;
+  bool _firebaseReady = false;
 
   @override
   void initState() {
@@ -321,6 +327,8 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       final database = await OperationalDatabase.open(localStore);
       await widget.state.attachOperationalDatabase(database);
       _timing('SQLite/migraciones en segundo plano', watch);
+      _attachedDatabase = database;
+      unawaited(_maybeStartCloudSync());
     } catch (error, stackTrace) {
       developer.log(
         'SQLite no disponible; el catalogo continua funcionando con Hive.',
@@ -341,6 +349,8 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
           .timeout(const Duration(seconds: 6));
       final firestore = _configuredFirestore();
       _timing('Firebase', watch);
+      _firebaseReady = true;
+      unawaited(_maybeStartCloudSync());
 
       // Firebase se conecta siempre después de que la UI local está disponible.
       // Al adjuntar este repositorio, cambios de país posteriores también pueden
@@ -485,6 +495,33 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       }
     } catch (error) {
       developer.log('Servicios remotos omitidos; se usan datos locales.', error: error);
+    }
+  }
+
+  // ── NUEVO: arranque de la sincronización familiar ───────────────────────
+  // Propósito: crear CloudSyncService y reanudarlo si estaba activo.
+  // Depende de: SQLite adjunto y Firebase inicializado.
+  // No modifica: el inicio local-first (corre en segundo plano y nunca lanza).
+  Future<void> _maybeStartCloudSync() async {
+    final database = _attachedDatabase;
+    final localStore = widget.localStore;
+    if (database == null || localStore == null || !_firebaseReady) return;
+    if (CloudSyncService.instance != null) return;
+    try {
+      final service = CloudSyncService(
+        state: widget.state,
+        localStore: localStore,
+        database: database,
+      );
+      CloudSyncService.instance = service;
+      await service.resume();
+    } catch (error, stackTrace) {
+      developer.log(
+        'Sincronización familiar no disponible',
+        name: 'mi_lista_plus.sync',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 

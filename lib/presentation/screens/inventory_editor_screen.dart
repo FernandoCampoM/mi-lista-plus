@@ -25,6 +25,10 @@ class InventoryEditorScreen extends StatefulWidget {
 
 class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
   final quantities = <String, int>{};
+  // CAMPO NUEVO: originalQuantities
+  // Motivo: guardar solo lo que el usuario cambió (sincronización familiar).
+  // Compatibilidad: no reemplaza ni altera el campo quantities.
+  final originalQuantities = <String, int>{};
   final quantityControllers = <String, TextEditingController>{};
   String query = '';
   ProductSortOption sortOption = ProductSortOption.stock;
@@ -39,6 +43,7 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
     final state = AppScope.of(context);
     for (final item in state.inventory) {
       quantities[item.product.id] = item.quantity;
+      originalQuantities[item.product.id] = item.quantity;
     }
     for (final product in state.products) {
       quantityControllers[product.id] = TextEditingController(
@@ -180,7 +185,12 @@ class _InventoryEditorScreenState extends State<InventoryEditorScreen> {
     setState(() => saving = true);
     final ads = AppScope.adsOf(context);
     try {
-      await AppScope.of(context).saveInventoryQuantities(quantities);
+      // Se aplica solo lo que cambió en el editor: si otro celular del hogar
+      // vendió mientras estaba abierto, esa venta no se pierde.
+      await AppScope.of(context).saveInventoryChanges(
+        original: originalQuantities,
+        edited: quantities,
+      );
       dirty = false;
       // Primero se cierra la pantalla y después, sin esperar, el anuncio:
       // así el usuario ve que el inventario quedó guardado.
