@@ -350,9 +350,13 @@ class SimulationDetailScreen extends StatelessWidget {
       if (!context.mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
 
+      // La imagen va con un resumen corto: productos y total.
       await Share.shareXFiles(
         [imageFile],
-        text: 'Simulación #${simulation.id}',
+        text: ShareSimulationService.buildImageCaption(
+          simulation: simulation,
+          country: country,
+        ),
       );
       if (context.mounted) {
         await AppScope.adsOf(context).recordImportantAction(
