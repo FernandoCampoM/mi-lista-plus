@@ -43,6 +43,10 @@ class CloudSyncService extends ChangeNotifier {
   /// Instancia creada en main.dart cuando SQLite y Firebase están listos.
   static CloudSyncService? instance;
 
+  /// Crea la instancia bajo demanda (lo registra main.dart). Lanza el error
+  /// real si todavía no se puede crear, para mostrarlo en pantalla.
+  static Future<CloudSyncService> Function()? initializer;
+
   /// Vendedores del hogar: id en la nube → nombre visible.
   static const sellers = {'fernando': 'Fernando', 'esposa': 'Esposa'};
 

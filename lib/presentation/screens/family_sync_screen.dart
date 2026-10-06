@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -27,6 +29,36 @@ class _FamilySyncScreenState extends State<FamilySyncScreen> {
   bool busy = false;
   bool obscure = true;
   String? progress;
+  // Error real si el servicio no se pudo crear al abrir la pantalla.
+  String? startupError;
+  bool starting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (CloudSyncService.instance == null) _startService();
+  }
+
+  Future<void> _startService() async {
+    final initializer = CloudSyncService.initializer;
+    if (initializer == null) {
+      setState(() => startupError =
+          'La app todavía se está iniciando. Intenta de nuevo en unos segundos.');
+      return;
+    }
+    setState(() {
+      starting = true;
+      startupError = null;
+    });
+    try {
+      await initializer();
+    } catch (error, stackTrace) {
+      developer.log('Sincronización familiar (inicio)', name: 'mi_lista_plus.sync', error: error, stackTrace: stackTrace);
+      if (mounted) setState(() => startupError = _signInError(error));
+    } finally {
+      if (mounted) setState(() => starting = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -52,14 +84,7 @@ class _FamilySyncScreenState extends State<FamilySyncScreen> {
             child: SafeArea(
               top: false,
               child: service == null
-                  ? const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text(
-                        'La base local o Firebase aún se están preparando. '
-                        'Vuelve en unos segundos.',
-                        textAlign: TextAlign.center,
-                      ),
-                    )
+                  ? _startupView()
                   : ListenableBuilder(
                       listenable: service,
                       builder: (context, _) => service.isActive
@@ -68,6 +93,33 @@ class _FamilySyncScreenState extends State<FamilySyncScreen> {
                     ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _startupView() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (starting) ...[
+            const CircularProgressIndicator(),
+            const SizedBox(height: 14),
+            const Text('Preparando la sincronización...'),
+          ] else ...[
+            Text(
+              startupError ?? 'Preparando la sincronización...',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _startService,
+              icon: const Icon(Icons.refresh),
+              label: const Text('REINTENTAR'),
+            ),
+          ],
         ],
       ),
     );
@@ -252,7 +304,8 @@ class _FamilySyncScreenState extends State<FamilySyncScreen> {
       );
       password.clear();
       _message('Sincronización activa como ${CloudSyncService.sellers[seller]}.');
-    } catch (error) {
+    } catch (error, stackTrace) {
+      developer.log('Sincronización familiar (activar)', name: 'mi_lista_plus.sync', error: error, stackTrace: stackTrace);
       _message(_signInError(error));
     } finally {
       if (mounted) {
@@ -302,7 +355,12 @@ class _FamilySyncScreenState extends State<FamilySyncScreen> {
     if (text.contains('permission-denied')) {
       return 'Firebase rechazó el acceso. Revisa que las reglas de seguridad estén publicadas.';
     }
-    return friendlyError(error);
+    if (text.contains('TimeoutException')) {
+      return 'Firebase tardó demasiado en responder. Revisa tu internet y toca REINTENTAR.';
+    }
+    if (error is StateError || error is ArgumentError) return friendlyError(error);
+    // Error no previsto: se muestra completo para poder diagnosticarlo.
+    return 'No se pudo completar: $text';
   }
 
   void _message(String value) {

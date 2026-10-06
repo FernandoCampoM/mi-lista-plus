@@ -265,11 +265,10 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
   String? lastOpenedFollowUpId;
   final Stopwatch homeWatch = Stopwatch()..start();
   bool databaseInitializationStarted = false;
-  // CAMPO NUEVO: _attachedDatabase / _firebaseReady
-  // Motivo: la sincronización familiar arranca cuando ambos están listos.
+  // CAMPO NUEVO: _attachedDatabase
+  // Motivo: la sincronización familiar arranca cuando SQLite está listo.
   // Compatibilidad: no reemplaza ni altera ningún campo existente.
   OperationalDatabase? _attachedDatabase;
-  bool _firebaseReady = false;
 
   @override
   void initState() {
@@ -349,7 +348,6 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
           .timeout(const Duration(seconds: 6));
       final firestore = _configuredFirestore();
       _timing('Firebase', watch);
-      _firebaseReady = true;
       unawaited(_maybeStartCloudSync());
 
       // Firebase se conecta siempre después de que la UI local está disponible.
@@ -503,18 +501,11 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
   // Depende de: SQLite adjunto y Firebase inicializado.
   // No modifica: el inicio local-first (corre en segundo plano y nunca lanza).
   Future<void> _maybeStartCloudSync() async {
-    final database = _attachedDatabase;
-    final localStore = widget.localStore;
-    if (database == null || localStore == null || !_firebaseReady) return;
-    if (CloudSyncService.instance != null) return;
+    // La pantalla oculta puede pedir el servicio si aún no existe.
+    CloudSyncService.initializer ??= _createCloudSync;
+    if (_attachedDatabase == null) return;
     try {
-      final service = CloudSyncService(
-        state: widget.state,
-        localStore: localStore,
-        database: database,
-      );
-      CloudSyncService.instance = service;
-      await service.resume();
+      await _createCloudSync();
     } catch (error, stackTrace) {
       developer.log(
         'Sincronización familiar no disponible',
@@ -524,6 +515,48 @@ class _MiListaPlusAppState extends State<MiListaPlusApp> {
       );
     }
   }
+
+  /// Crea el servicio (una sola vez) y lo reanuda si estaba activo. Ya no
+  /// depende de que _initializeRemote termine dentro de su límite de 6 s:
+  /// inicializa Firebase por su cuenta con un margen mayor.
+  Future<CloudSyncService> _createCloudSync() async {
+    final existing = CloudSyncService.instance;
+    if (existing != null) return existing;
+    final pending = _cloudSyncCreation;
+    if (pending != null) return pending;
+    final creation = () async {
+      final database = _attachedDatabase;
+      final localStore = widget.localStore;
+      if (database == null || localStore == null) {
+        throw StateError(
+          'La base local todavía se está preparando. Intenta de nuevo en unos segundos.',
+        );
+      }
+      await _ensureFirebaseInitialized().timeout(const Duration(seconds: 20));
+      _configuredFirestore();
+      final service = CloudSyncService(
+        state: widget.state,
+        localStore: localStore,
+        database: database,
+      );
+      CloudSyncService.instance = service;
+      await service.resume();
+      return service;
+    }();
+    _cloudSyncCreation = creation;
+    try {
+      return await creation;
+    } catch (_) {
+      // Si falló (sin red al iniciar Firebase, etc.), se puede reintentar.
+      if (identical(_cloudSyncCreation, creation)) _cloudSyncCreation = null;
+      rethrow;
+    }
+  }
+
+  // CAMPO NUEVO: _cloudSyncCreation
+  // Motivo: evitar crear dos servicios si se piden al mismo tiempo.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  Future<CloudSyncService>? _cloudSyncCreation;
 
   Future<void> _openPayload(String payload) async {
     final id = FollowUpNotificationService.followUpIdFromPayload(payload);
