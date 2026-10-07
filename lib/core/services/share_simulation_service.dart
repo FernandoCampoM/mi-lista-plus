@@ -33,10 +33,34 @@ class ShareSimulationService {
       country: country,
     );
 
-    final tempDir = await Directory.systemTemp.createTemp('mi_lista_plus_share_');
+    await _deletePreviousShareDirectories();
+    final tempDir = await Directory.systemTemp.createTemp(_shareDirPrefix);
     final file = File('${tempDir.path}/simulacion_${simulation.id}.png');
     await file.writeAsBytes(bytes, flush: true);
     return XFile(file.path, mimeType: 'image/png', name: 'simulacion_${simulation.id}.png');
+  }
+
+  // ── NUEVO: limpieza de imágenes compartidas anteriores ──────────────────
+  // Propósito: borrar las carpetas temporales de compartidos previos, que
+  //            antes se acumulaban (PNG a pixelRatio 3).
+  // Depende de: el prefijo de carpeta usado por buildImageFile.
+  // No modifica: la imagen que se está compartiendo ahora.
+  static const _shareDirPrefix = 'mi_lista_plus_share_';
+
+  static Future<void> _deletePreviousShareDirectories() async {
+    try {
+      final entries = Directory.systemTemp.listSync().whereType<Directory>();
+      for (final directory in entries) {
+        final name = directory.uri.pathSegments
+            .where((segment) => segment.isNotEmpty)
+            .last;
+        if (name.startsWith(_shareDirPrefix)) {
+          await directory.delete(recursive: true);
+        }
+      }
+    } catch (_) {
+      // La limpieza nunca debe impedir compartir.
+    }
   }
 
   static Future<void> shareAsImage({
@@ -46,8 +70,29 @@ class ShareSimulationService {
     final file = await buildImageFile(simulation: simulation, country: country);
     await Share.shareXFiles(
       [file],
-      text: 'Simulación #${simulation.id}',
+      text: buildImageCaption(simulation: simulation, country: country),
     );
+  }
+
+  // ── NUEVO: texto que acompaña la imagen compartida ──────────────────────
+  // Propósito: un resumen corto para el pie de la imagen: solo cantidades y
+  //            nombres de productos y el total (sin número, país, cliente,
+  //            puntos ni precios individuales).
+  // Depende de: CurrencyFormatter y Simulation.totalAmount.
+  // No modifica: buildShareText ("Compartir como texto" sigue igual).
+  static String buildImageCaption({
+    required Simulation simulation,
+    required Country country,
+  }) {
+    final formatter = CurrencyFormatter(country);
+    final buffer = StringBuffer()..writeln('🛍️ *Tu pedido*');
+    for (final item in simulation.items) {
+      buffer.writeln('▪️ ${item.quantity} × ${item.product.name}');
+    }
+    buffer
+      ..writeln('━━━━━━━━━━━━━━')
+      ..write('💰 *Total: ${formatter.money(simulation.totalAmount)}*');
+    return buffer.toString();
   }
 
   static String buildShareText({

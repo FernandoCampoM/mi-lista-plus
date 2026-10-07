@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../domain/entities/product.dart';
@@ -27,7 +29,7 @@ class FirestoreProductRemoteDataSource {
     final snapshot = await firestore
         .collection('catalog_metadata')
         .doc(countryCode)
-        .get();
+        .get(_serverOnly);
 
     if (!snapshot.exists) return null;
 
@@ -52,13 +54,30 @@ class FirestoreProductRemoteDataSource {
         .doc(countryCode)
         .collection('products')
         .orderBy('name')
-        .get();
+        .get(_serverOnly);
 
-    return snapshot.docs
-        .where((doc) => doc.data()['active'] != false)
-        .map((doc) => _fromFirestore(doc.id, doc.data()))
-        .toList();
+    final products = <Product>[];
+    for (final doc in snapshot.docs.where((doc) => doc.data()['active'] != false)) {
+      // Un documento mal formado se omite en vez de invalidar todo el catálogo.
+      try {
+        products.add(_fromFirestore(doc.id, doc.data()));
+      } catch (error) {
+        developer.log(
+          'Producto remoto omitido por formato inválido: ${doc.id}',
+          name: 'mi_lista_plus.catalog',
+          error: error,
+        );
+      }
+    }
+    return products;
   }
+
+  // ── NUEVO: lectura solo desde el servidor ───────────────────────────────
+  // Propósito: evitar que la caché offline de Firestore se guarde en Hive como
+  //            si fuera la versión nueva del catálogo.
+  // Depende de: cloud_firestore GetOptions.
+  // No modifica: la persistencia de Firestore configurada en main.dart.
+  static const _serverOnly = GetOptions(source: Source.server);
 
   Product _fromFirestore(String id, Map<String, dynamic> data) {
     final timestamp = data['updatedAt'];
@@ -82,7 +101,7 @@ class FirestoreProductRemoteDataSource {
           .map((key, value) => MapEntry(
                 int.parse(key),
                 (value as num).toDouble(),
-              )),
+              ),),
       description: data['description'] as String?,
     );
   }

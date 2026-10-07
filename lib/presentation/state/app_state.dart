@@ -17,6 +17,7 @@ import '../../data/datasources/operational_database.dart';
 import '../../data/repositories/product_repository_impl.dart';
 import '../../core/services/follow_up_notification_service.dart';
 import '../../core/services/encrypted_backup_service.dart';
+import '../../core/errors/friendly_error.dart';
 
 enum HomeTab { products, simulations }
 
@@ -47,6 +48,20 @@ class AppState extends ChangeNotifier {
   HomeTab tab = HomeTab.products;
   Simulation? editingSimulation;
 
+  // ── NUEVO: cola de escrituras de ventas/inventario ──────────────────────
+  // Propósito: ejecutar una operación de escritura detrás de otra para que dos
+  //            operaciones simultáneas no se pisen las listas en memoria.
+  // Depende de: nada externo.
+  // No modifica: firmas ni contratos async de los métodos que la usan.
+  // Importante: una operación encolada nunca debe llamar a otra encolada.
+  Future<void> _writeQueue = Future<void>.value();
+
+  Future<T> _serialized<T>(Future<T> Function() action) {
+    final result = _writeQueue.then((_) => action());
+    _writeQueue = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
+  }
+
   List<CartItem> get cartItems => _cart.values.toList();
 
   int get cartUnits {
@@ -68,23 +83,65 @@ class AppState extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
-    countries = await _repository.getCountries();
-    await _reloadCrm();
-    await _ensureBirthdayFollowUps();
-    final countryCode = await _repository.getSelectedCountry();
-    if (countryCode != null) {
-      final storedCountry = countries.firstWhere(
-        (country) => country.code == countryCode,
-        orElse: () => countries.first,
-      );
-      await loadCountry(storedCountry, persist: false);
+    // Si algo falla, la pantalla de carga no debe quedar infinita. El error se
+    // propaga igual que antes para no cambiar el contrato con quien llama.
+    try {
+      countries = await _repository.getCountries();
+      await _reloadCrm();
+      await _ensureBirthdayFollowUps();
+      final countryCode = await _repository.getSelectedCountry();
+      if (countryCode != null) {
+        final storedCountry = countries.firstWhere(
+          (country) => country.code == countryCode,
+          orElse: () => countries.first,
+        );
+        await loadCountry(storedCountry, persist: false);
+      }
+    } finally {
+      isLoading = false;
+      notifyListeners();
     }
-
-    isLoading = false;
-    notifyListeners();
   }
 
   Future<bool> loadCountry(Country country, {bool persist = true}) async {
+    try {
+      return await _loadCountry(country, persist: persist);
+    } catch (_) {
+      // Un dato local dañado no debe dejar isLoading=true para siempre.
+      errorMessage =
+          'No se pudieron leer los datos guardados de ${country.name}.';
+      isLoading = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  // ── NUEVO: recarga del catálogo sin perder el trabajo en curso ──────────
+  // Propósito: reemplazar products tras una sincronización en segundo plano
+  //            sin vaciar carrito, simulación en edición ni descuento.
+  // Depende de: ProductRepository.loadProducts, selectedCountry, inventory.
+  // No modifica: loadCountry (sigue limpiando el carrito al cambiar de país).
+  Future<void> refreshCatalog(Country country) async {
+    if (selectedCountry?.code != country.code) return;
+    final loadedProducts = await _repository.loadProducts(country.code);
+    // El usuario pudo cambiar de país mientras se leía el catálogo.
+    if (loadedProducts.isEmpty || selectedCountry?.code != country.code) {
+      return;
+    }
+    products = loadedProducts;
+    final productsById = {for (final product in products) product.id: product};
+    inventory = inventory
+        .map(
+          (item) => InventoryItem(
+            product: productsById[item.product.id] ?? item.product,
+            quantity: item.quantity,
+          ),
+        )
+        .toList();
+    notifyListeners();
+  }
+
+  Future<bool> _loadCountry(Country country, {bool persist = true}) async {
     final previousCountry = selectedCountry;
 
     isLoading = true;
@@ -94,7 +151,7 @@ class AppState extends ChangeNotifier {
     try {
       await _repository.syncProductsIfNeeded(country.code);
     } catch (error) {
-      errorMessage = error.toString();
+      errorMessage = friendlyError(error);
     }
 
     final loadedProducts = await _repository.loadProducts(country.code);
@@ -272,7 +329,10 @@ class AppState extends ChangeNotifier {
     return inventory.fold(0, (sum, item) => sum + item.discountedValue40);
   }
 
-  Future<void> saveInventoryQuantities(Map<String, int> quantities) async {
+  Future<void> saveInventoryQuantities(Map<String, int> quantities) =>
+      _serialized(() => _saveInventoryQuantities(quantities));
+
+  Future<void> _saveInventoryQuantities(Map<String, int> quantities) async {
     final country = selectedCountry;
     if (country == null) {
       throw StateError('Debe seleccionar un pais antes de crear inventario.');
@@ -292,6 +352,12 @@ class AppState extends ChangeNotifier {
         next.add(InventoryItem(product: product, quantity: quantity));
       }
     }
+    // Productos retirados del catálogo no aparecen en el editor; su stock se
+    // conserva tal cual en lugar de ponerse en cero al guardar.
+    final catalogIds = {for (final product in products) product.id};
+    next.addAll(
+      inventory.where((item) => !catalogIds.contains(item.product.id)),
+    );
 
     await _repository.saveInventory(country.code, next);
     inventory = await _repository.loadInventory(country.code);
@@ -308,6 +374,29 @@ class AppState extends ChangeNotifier {
     String? customerId,
     bool delivered = false,
     DateTime? deliveredAt,
+  }) =>
+      _serialized(() => _registerSale(
+            customerName: customerName,
+            discountPercent: discountPercent,
+            quantities: quantities,
+            giftProductIds: giftProductIds,
+            receivedAmount: receivedAmount,
+            sourceSimulationId: sourceSimulationId,
+            customerId: customerId,
+            delivered: delivered,
+            deliveredAt: deliveredAt,
+          ),);
+
+  Future<Sale> _registerSale({
+    required String customerName,
+    required int discountPercent,
+    required Map<String, int> quantities,
+    required Set<String> giftProductIds,
+    required double? receivedAmount,
+    required String? sourceSimulationId,
+    required String? customerId,
+    required bool delivered,
+    required DateTime? deliveredAt,
   }) async {
     final country = selectedCountry;
     if (country == null) {
@@ -450,6 +539,29 @@ class AppState extends ChangeNotifier {
     String? customerId,
     bool? delivered,
     DateTime? deliveredAt,
+  }) =>
+      _serialized(() => _updateSale(
+            originalSale: originalSale,
+            customerName: customerName,
+            discountPercent: discountPercent,
+            quantities: quantities,
+            giftProductIds: giftProductIds,
+            receivedAmount: receivedAmount,
+            customerId: customerId,
+            delivered: delivered,
+            deliveredAt: deliveredAt,
+          ),);
+
+  Future<Sale> _updateSale({
+    required Sale originalSale,
+    required String customerName,
+    required int discountPercent,
+    required Map<String, int> quantities,
+    required Set<String> giftProductIds,
+    required double? receivedAmount,
+    required String? customerId,
+    required bool? delivered,
+    required DateTime? deliveredAt,
   }) async {
     final country = selectedCountry;
     if (country == null) {
@@ -515,7 +627,9 @@ class AppState extends ChangeNotifier {
     return updated;
   }
 
-  Future<Sale> cancelSale(Sale sale) async {
+  Future<Sale> cancelSale(Sale sale) => _serialized(() => _cancelSale(sale));
+
+  Future<Sale> _cancelSale(Sale sale) async {
     final country = selectedCountry;
     if (country == null) throw StateError('No hay un pais seleccionado.');
     if (!sale.isCompleted) return sale;
@@ -540,7 +654,9 @@ class AppState extends ChangeNotifier {
     return cancelled;
   }
 
-  Future<void> deleteSale(Sale sale) async {
+  Future<void> deleteSale(Sale sale) => _serialized(() => _deleteSale(sale));
+
+  Future<void> _deleteSale(Sale sale) async {
     final country = selectedCountry;
     if (country == null) throw StateError('No hay un pais seleccionado.');
     final nextInventory = sale.isCompleted
@@ -680,7 +796,9 @@ class AppState extends ChangeNotifier {
     final numbersById = <String, int>{};
     for (final sale in chronological) {
       if (sale.number > 0) continue;
-      while (used.contains(candidate)) candidate++;
+      while (used.contains(candidate)) {
+        candidate++;
+      }
       numbersById[sale.id] = candidate;
       used.add(candidate);
       candidate++;
@@ -749,6 +867,39 @@ class AppState extends ChangeNotifier {
     customers = await db.loadCustomers(includeArchived: true);
     followUps = await db.loadFollowUps();
     followUpNotes = await db.loadFollowUpNotes();
+    if (_crmBatchDepth > 0) {
+      // Dentro de una operación compuesta los datos se recargan igual (los
+      // pasos siguientes los necesitan frescos); solo la reprogramación de
+      // notificaciones se hace una vez al final.
+      _notificationsDirty = true;
+      return;
+    }
+    await _rescheduleFromMemory(db);
+  }
+
+  // ── NUEVO: agrupación de recargas del CRM ───────────────────────────────
+  // Propósito: que una operación como archivar un cliente reprograme las
+  //            notificaciones una sola vez en lugar de 3–5 veces.
+  // Depende de: _reloadCrm, FollowUpNotificationService.reschedule.
+  // No modifica: los datos recargados ni el estado final de notificaciones.
+  int _crmBatchDepth = 0;
+  bool _notificationsDirty = false;
+
+  Future<T> _crmBatch<T>(Future<T> Function() action) async {
+    _crmBatchDepth++;
+    try {
+      return await action();
+    } finally {
+      _crmBatchDepth--;
+      final db = _operationalDatabase;
+      if (_crmBatchDepth == 0 && _notificationsDirty && db != null) {
+        _notificationsDirty = false;
+        await _rescheduleFromMemory(db);
+      }
+    }
+  }
+
+  Future<void> _rescheduleFromMemory(OperationalDatabase db) async {
     await _notificationService?.reschedule(
       followUps, customers,
       reminderHour: await db.reminderHour,
@@ -763,7 +914,8 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> attachOperationalDatabase(OperationalDatabase database) async {
+  Future<void> attachOperationalDatabase(OperationalDatabase database) =>
+      _crmBatch(() async {
     if (identical(_operationalDatabase, database)) return;
     _operationalDatabase = database;
     final repository = _repository;
@@ -773,7 +925,7 @@ class AppState extends ChangeNotifier {
     await _reloadCrm();
     await _ensureBirthdayFollowUps();
     notifyListeners();
-  }
+  });
 
   EncryptedBackupService get backupService {
     final db = _operationalDatabase;
@@ -817,19 +969,28 @@ class AppState extends ChangeNotifier {
     if (db == null) return;
     final now = DateTime.now();
     final changes = <FollowUp>[];
+    // Índice de cumpleaños por cliente: evita recorrer todos los seguimientos
+    // por cada cliente (antes O(clientes × seguimientos)).
+    final birthdaysByCustomer = <String, List<FollowUp>>{};
+    for (final item in followUps) {
+      if (item.type == FollowUpType.birthday) {
+        (birthdaysByCustomer[item.customerId] ??= []).add(item);
+      }
+    }
+    final knownIds = {for (final item in followUps) item.id};
     for (final customer in customers) {
       final birthday = customer.birthday;
-      final currentPending = followUps.where((item) =>
-          item.customerId == customer.id &&
-          item.type == FollowUpType.birthday &&
-          item.status == FollowUpStatus.pending);
+      final customerBirthdays =
+          birthdaysByCustomer[customer.id] ?? const <FollowUp>[];
+      final currentPending = customerBirthdays
+          .where((item) => item.status == FollowUpStatus.pending);
       if (birthday == null ||
           customer.isArchived ||
           !customer.birthdayRemindersEnabled ||
           !customer.hasActiveConsent) {
         changes.addAll(currentPending.map(
           (item) => item.copyWith(status: FollowUpStatus.cancelled),
-        ));
+        ),);
         continue;
       }
       final today = DateTime(now.year, now.month, now.day);
@@ -837,11 +998,9 @@ class AppState extends ChangeNotifier {
       if (DateTime(due.year, due.month, due.day).isBefore(today)) {
         due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
       }
-      final completedThisYear = followUps.any((item) =>
-          item.customerId == customer.id &&
-          item.type == FollowUpType.birthday &&
+      final completedThisYear = customerBirthdays.any((item) =>
           item.dueAt.year == now.year &&
-          item.status == FollowUpStatus.completed);
+          item.status == FollowUpStatus.completed,);
       if (completedThisYear && due.year == now.year) {
         due = DateTime(now.year + 1, birthday.month, birthday.day, 9);
       }
@@ -851,7 +1010,7 @@ class AppState extends ChangeNotifier {
       for (final item in pending) {
         if (item.dueAt.year == due.year && keep == null) {
           keep = item.dueAt == due ? item : item.copyWith(dueAt: due);
-          if (keep != item) changes.add(keep!);
+          if (keep != item) changes.add(keep);
         } else {
           changes.add(item.copyWith(status: FollowUpStatus.cancelled));
         }
@@ -863,13 +1022,14 @@ class AppState extends ChangeNotifier {
         dueAt: due,
         createdAt: now,
       );
-      if (!followUps.any((item) => item.id == keep!.id)) changes.add(keep!);
+      if (!knownIds.contains(keep.id)) changes.add(keep);
     }
     if (changes.isNotEmpty) await db.saveFollowUps(changes);
     await _reloadCrm();
   }
 
-  Future<Customer> saveCustomer(Customer customer) async {
+  Future<Customer> saveCustomer(Customer customer) =>
+      _crmBatch(() async {
     final db = _operationalDatabase;
     if (db == null) throw StateError('La base local segura no esta disponible.');
     await db.saveCustomer(customer);
@@ -877,7 +1037,7 @@ class AppState extends ChangeNotifier {
     await _ensureBirthdayFollowUps();
     notifyListeners();
     return customer;
-  }
+  });
 
   Future<Customer> createCustomer({
     required String name,
@@ -895,25 +1055,27 @@ class AppState extends ChangeNotifier {
       consentAt: now, consentScopes: const {
         ConsentScope.phone, ConsentScope.birthday, ConsentScope.goals, ConsentScope.notes,
       }, createdAt: now, updatedAt: now,
-    ));
+    ),);
   }
 
-  Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) async {
+  Future<void> pauseCustomerFollowUp(Customer customer, {DateTime? until, String? reason}) =>
+      _crmBatch(() async {
     await saveCustomer(customer.copyWith(
       followUpEnabled: false, followUpPausedUntil: until,
       followUpPauseReason: reason ?? '',
-    ));
+    ),);
     final db = _operationalDatabase;
     if (db != null) {
       await db.saveFollowUps(followUps
           .where((item) => item.customerId == customer.id && item.status == FollowUpStatus.pending)
-          .map((item) => item.copyWith(status: FollowUpStatus.paused)));
+          .map((item) => item.copyWith(status: FollowUpStatus.paused)),);
       await _reloadCrm();
       notifyListeners();
     }
-  }
+  });
 
-  Future<void> resumeCustomerFollowUp(Customer customer, {bool fromToday = true}) async {
+  Future<void> resumeCustomerFollowUp(Customer customer, {bool fromToday = true}) =>
+      _crmBatch(() async {
     await saveCustomer(customer.copyWith(followUpEnabled: true, clearPausedUntil: true));
     final now = DateTime.now();
     final db = _operationalDatabase;
@@ -923,24 +1085,25 @@ class AppState extends ChangeNotifier {
           .map((item) => item.copyWith(
                 status: FollowUpStatus.pending,
                 dueAt: fromToday && item.dueAt.isBefore(now) ? now : item.dueAt,
-              )));
+              ),),);
       await _reloadCrm();
       notifyListeners();
     }
-  }
+  });
 
   Future<void> completeFollowUp(
     FollowUp item, {
     String notes = '',
     FollowUpContactMethod contactMethod = FollowUpContactMethod.other,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     final db = _operationalDatabase;
     final completedAt = DateTime.now();
     await _operationalDatabase?.saveFollowUp(item.copyWith(
       status: FollowUpStatus.completed,
       completedAt: completedAt,
       notes: notes.trim(),
-    ));
+    ),);
     if (db != null && notes.trim().isNotEmpty) {
       await db.saveFollowUpNote(FollowUpNote(
         id: _uuid.v4(),
@@ -953,23 +1116,27 @@ class AppState extends ChangeNotifier {
         contactMethod: contactMethod,
         deviceId: db.deviceId,
         createdAt: completedAt,
-      ));
+      ),);
     }
     await _reloadCrm();
     if (item.type == FollowUpType.birthday) {
       await _ensureBirthdayFollowUps();
     }
     if (item.type == FollowUpType.periodic) {
+      final nextDay = completedAt.add(const Duration(days: 15));
       final next = FollowUp(
         id: _uuid.v4(), customerId: item.customerId, saleId: item.saleId,
-        type: FollowUpType.periodic, dueAt: item.dueAt.add(const Duration(days: 15)),
+        // Se cuenta desde que se completó: si se completó con retraso, el
+        // siguiente seguimiento no debe nacer ya vencido.
+        type: FollowUpType.periodic,
+        dueAt: DateTime(nextDay.year, nextDay.month, nextDay.day, 9),
         createdAt: DateTime.now(),
       );
       await _operationalDatabase?.saveFollowUp(next);
       await _reloadCrm();
     }
     notifyListeners();
-  }
+  });
 
   Future<void> addManualNote({
     required String customerId,
@@ -990,7 +1157,7 @@ class AppState extends ChangeNotifier {
       contactMethod: contactMethod,
       deviceId: db.deviceId,
       createdAt: DateTime.now(),
-    ));
+    ),);
     followUpNotes = await db.loadFollowUpNotes();
     notifyListeners();
   }
@@ -1022,7 +1189,8 @@ class AppState extends ChangeNotifier {
 
   FollowUpNotificationService? get notificationService => _notificationService;
 
-  Future<void> archiveCustomer(Customer customer, {bool archived = true}) async {
+  Future<void> archiveCustomer(Customer customer, {bool archived = true}) =>
+      _crmBatch(() async {
     final updated = customer.copyWith(
       archivedAt: archived ? DateTime.now() : null,
       clearArchivedAt: !archived,
@@ -1030,21 +1198,23 @@ class AppState extends ChangeNotifier {
     );
     await saveCustomer(updated);
     if (archived) await pauseCustomerFollowUp(updated, reason: 'Cliente archivado');
-  }
+  });
 
-  Future<void> revokeCustomerConsent(Customer customer) async {
+  Future<void> revokeCustomerConsent(Customer customer) =>
+      _crmBatch(() async {
     final revoked = customer.copyWith(
       consentRevokedAt: DateTime.now(), followUpEnabled: false,
       allowCalls: false, allowWhatsApp: false,
     );
     await saveCustomer(revoked);
     await _cancelCustomerFollowUps(customer.id);
-  }
+  });
 
   Future<void> reactivateCustomerConsent(
     Customer customer, {
     bool resumeFollowUp = false,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     final reactivated = customer.copyWith(
       consentAt: DateTime.now(),
       clearConsentRevocation: true,
@@ -1056,7 +1226,7 @@ class AppState extends ChangeNotifier {
     if (resumeFollowUp) {
       await resumeCustomerFollowUp(reactivated, fromToday: true);
     }
-  }
+  });
 
   Future<void> updateCustomerProfile({
     required Customer customer,
@@ -1066,7 +1236,8 @@ class AppState extends ChangeNotifier {
     required String goal,
     required DateTime? birthday,
     required bool consentGranted,
-  }) async {
+  }) =>
+      _crmBatch(() async {
     var updated = customer.copyWith(
       name: name.trim(),
       callingCode: callingCode.trim(),
@@ -1097,11 +1268,21 @@ class AppState extends ChangeNotifier {
       return;
     }
     await saveCustomer(updated);
-  }
+  });
 
-  Future<void> confirmDelivery(Sale sale, {DateTime? deliveredAt}) async {
+  Future<void> confirmDelivery(Sale sale, {DateTime? deliveredAt}) =>
+      _serialized(() => _confirmDelivery(sale, deliveredAt: deliveredAt));
+
+  Future<void> _confirmDelivery(Sale sale, {DateTime? deliveredAt}) async {
     if (sale.customerId == null) throw StateError('Asocia un cliente antes de confirmar la entrega.');
-    final updated = sale.copyWith(
+    // Se trabaja sobre la venta vigente, no sobre la copia que tenía la
+    // pantalla: así una venta cancelada no se puede entregar y confirmar no
+    // revierte una cancelación hecha después de abrir el detalle.
+    final current = saleById(sale.id);
+    if (current == null || !current.isCompleted) {
+      throw StateError('No se puede confirmar la entrega de una venta cancelada.');
+    }
+    final updated = current.copyWith(
       deliveryStatus: DeliveryStatus.delivered,
       deliveredAt: deliveredAt ?? DateTime.now(),
     );
@@ -1128,7 +1309,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     final existing = followUps.where((item) =>
-        item.saleId == sale.id && item.status != FollowUpStatus.cancelled).toList();
+        item.saleId == sale.id && item.status != FollowUpStatus.cancelled,).toList();
     if (existing.isNotEmpty) {
       await _rescheduleSaleFollowUps(sale, existing);
       return;
@@ -1159,7 +1340,7 @@ class AppState extends ChangeNotifier {
           quantity: saleItem.quantity,
         ),
         createdAt: now,
-      ));
+      ),);
     }
     await db.saveFollowUps(items);
     await _reloadCrm();
@@ -1167,7 +1348,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _cancelPendingFollowUpsForSale(String saleId) async {
     final pending = followUps.where((item) =>
-        item.saleId == saleId && item.status == FollowUpStatus.pending);
+        item.saleId == saleId && item.status == FollowUpStatus.pending,);
     await _operationalDatabase?.saveFollowUps(
       pending.map((item) => item.copyWith(status: FollowUpStatus.cancelled)),
     );

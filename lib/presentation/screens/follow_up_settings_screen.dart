@@ -134,7 +134,7 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
                     : notificationsAllowed!
                         ? 'Notificaciones permitidas'
                         : 'Notificaciones bloqueadas',
-                    style: TextStyle(color: notificationsAllowed == true ? AppColors.green : AppColors.orange)),
+                    style: TextStyle(color: notificationsAllowed == true ? AppColors.green : AppColors.orange),),
                 Text('Programadas: ${pendingNotifications ?? '-'}'),
                 if (manufacturer.contains('xiaomi') || manufacturer.contains('redmi'))
                   const Padding(
@@ -146,8 +146,8 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
                   OutlinedButton.icon(onPressed: _sendTest, icon: const Icon(Icons.notifications_active_outlined), label: const Text('ENVIAR NOTIFICACION DE PRUEBA')),
                   TextButton.icon(onPressed: _openSettings, icon: const Icon(Icons.settings_outlined), label: const Text('ABRIR AJUSTES')),
                   IconButton(tooltip: 'Actualizar diagnostico', onPressed: _loadDiagnostics, icon: const Icon(Icons.refresh)),
-                ]),
-              ]),
+                ],),
+              ],),
             ),
           ),
           const Padding(
@@ -291,11 +291,13 @@ class _FollowUpSettingsScreenState extends State<FollowUpSettingsScreen> {
     final allowed = await service.notificationsAllowed();
     final count = await service.pendingCount();
     final maker = await service.manufacturer();
-    if (mounted) setState(() {
+    if (mounted) {
+      setState(() {
       notificationsAllowed = allowed;
       pendingNotifications = count;
       manufacturer = maker;
     });
+    }
   }
 
   Future<void> _sendTest() async {

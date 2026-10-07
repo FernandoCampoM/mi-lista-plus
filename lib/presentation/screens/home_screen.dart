@@ -7,6 +7,7 @@ import '../state/app_state.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import '../widgets/cart_badge_button.dart';
+import '../widgets/confirm_action_dialog.dart';
 import 'product_list_screen.dart';
 import 'inventory_screen.dart';
 import 'simulation_detail_screen.dart';
@@ -224,7 +225,7 @@ class _CategoryBanner extends StatelessWidget {
               Text(
                 subtitle,
                 style: TextStyle(
-                  color: Colors.white.withOpacity(.65),
+                  color: Colors.white.withValues(alpha: .65),
                   fontWeight: FontWeight.w900,
                   fontSize: 34,
                 ),
@@ -285,8 +286,18 @@ class _SimulationListState extends State<_SimulationList> {
                 if (selectedIds.isNotEmpty)
                   IconButton.filled(
                     onPressed: () async {
-                      await state.deleteSimulations(selectedIds);
-                      setState(selectedIds.clear);
+                      final count = selectedIds.length;
+                      final confirmed = await confirmAction(
+                        context,
+                        title: count == 1
+                            ? '¿Eliminar la simulación?'
+                            : '¿Eliminar $count simulaciones?',
+                        message: 'Esta acción no se puede deshacer.',
+                        confirmLabel: 'ELIMINAR',
+                      );
+                      if (!confirmed || !context.mounted) return;
+                      await state.deleteSimulations(Set.of(selectedIds));
+                      if (mounted) setState(selectedIds.clear);
                     },
                     icon: const Icon(Icons.delete),
                     style: IconButton.styleFrom(
@@ -342,8 +353,19 @@ class _SimulationListState extends State<_SimulationList> {
                         return false;
                       }
 
+                      final confirmed = await confirmAction(
+                        context,
+                        title: '¿Eliminar la simulación?',
+                        message:
+                            'Se eliminará la simulación de ${simulation.customerName}. '
+                            'Esta acción no se puede deshacer.',
+                        confirmLabel: 'ELIMINAR',
+                      );
+                      if (!confirmed) return false;
                       await state.deleteSimulation(simulation);
-                      setState(() => selectedIds.remove(simulation.id));
+                      if (mounted) {
+                        setState(() => selectedIds.remove(simulation.id));
+                      }
                       return true;
                     },
                     child: DecoratedBox(

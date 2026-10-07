@@ -21,7 +21,7 @@ class CartBadgeButton extends StatelessWidget {
           ),
           icon: const Icon(Icons.shopping_cart),
           style: IconButton.styleFrom(
-            backgroundColor: Colors.white.withOpacity(.13),
+            backgroundColor: Colors.white.withValues(alpha: .13),
             foregroundColor: Colors.white,
           ),
         ),

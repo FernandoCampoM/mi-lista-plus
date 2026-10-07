@@ -57,7 +57,7 @@ void main() {
 
     expect(options, hasLength(1));
     expect(options.single.name, 'Cliente anterior');
-    expect(options.single.statusLabel, 'Cliente no disponible localmente');
+    expect(options.single.statusLabel, 'Cliente histórico no disponible localmente');
   });
 }
 

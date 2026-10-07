@@ -126,12 +126,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: Colors.black.withOpacity(.08),
+                            color: Colors.black.withValues(alpha: .08),
                             width: .8,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(.025),
+                              color: Colors.black.withValues(alpha: .025),
                               blurRadius: 7,
                               offset: const Offset(0, 2),
                             ),

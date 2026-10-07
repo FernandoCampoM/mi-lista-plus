@@ -3,7 +3,12 @@
 .flutter-plugins-dependencies
 .packages
 build/
-android/
+# android/ se versiona; sus secretos quedan ignorados:
+android/key.properties
+android/local.properties
+android/app/google-services.json
+**/*.jks
+**/*.keystore
 ios/
 linux/
 macos/
@@ -11,3 +16,4 @@ web/
 windows/
 *.iml
 pubspec.lock
+android/.kotlin/

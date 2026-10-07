@@ -51,6 +51,7 @@ class ProductRepositoryImpl implements ProductRepository {
     return _localStore.loadProducts(countryCode);
   }
 
+  @Deprecated('Sin uso en la app; se conserva por compatibilidad.')
   Future<List<Product>> loadProductsWithFallback(String countryCode) async {
     var products = await loadProducts(countryCode);
     if (products.isNotEmpty || countryCode == defaultCountryCode) {
@@ -62,6 +63,7 @@ class ProductRepositoryImpl implements ProductRepository {
     return products;
   }
 
+  @Deprecated('Sin uso en la app; se conserva por compatibilidad.')
   Future<bool> hasProducts(String countryCode) async {
     if (_localStore.loadProducts(countryCode).isNotEmpty) return true;
     if (!_remoteDataSource.isAvailable) return false;
@@ -131,9 +133,27 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   Future<void> _saveSimulation(Simulation simulation) async {
-    await _localStore.saveSimulation(simulation);
-    final payload = _localStore.rawOperationalValue('simulations', simulation.countryCode);
-    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', simulation.countryCode, payload);
+    // Se parte de la lista vigente (SQLite si existe). Antes se partía de Hive,
+    // que no incluye lo importado desde un respaldo, y al sobrescribir SQLite
+    // se borraban todas las simulaciones importadas.
+    final current = await loadSimulations(simulation.countryCode);
+    await _writeSimulations(simulation.countryCode, [
+      simulation,
+      ...current.where((item) => item.id != simulation.id),
+    ]);
+  }
+
+  // ── NUEVO: escritura de la lista completa de simulaciones ───────────────
+  // Propósito: guardar la MISMA lista en Hive y en el snapshot de SQLite.
+  // Depende de: LocalStore.saveSimulations, rawOperationalValue, writeSnapshot.
+  // No modifica: el formato persistido de las simulaciones.
+  Future<void> _writeSimulations(
+    String countryCode,
+    List<Simulation> simulations,
+  ) async {
+    await _localStore.saveSimulations(countryCode, simulations);
+    final payload = _localStore.rawOperationalValue('simulations', countryCode);
+    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', countryCode, payload);
   }
 
   @override
@@ -154,9 +174,12 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   Future<void> _deleteSimulation(String countryCode, Set<String> ids) async {
-    await _localStore.deleteSimulations(countryCode, ids);
-    final payload = _localStore.rawOperationalValue('simulations', countryCode);
-    if (payload != null) await operationalDatabase?.writeSnapshot('simulations', countryCode, payload);
+    // Igual que al guardar: se borra sobre la lista vigente, no sobre Hive.
+    final current = await loadSimulations(countryCode);
+    await _writeSimulations(
+      countryCode,
+      current.where((item) => !ids.contains(item.id)).toList(),
+    );
   }
 
   @override
@@ -165,13 +188,49 @@ class ProductRepositoryImpl implements ProductRepository {
     if (db != null && await db.isMigrationValidated) {
       final stock = await db.stock(countryCode);
       final products = _localStore.loadProducts(countryCode);
-      return products
+      final items = products
           .where((product) => (stock[product.id] ?? 0) > 0)
           .map((product) => InventoryItem(product: product, quantity: stock[product.id]!))
           .toList();
+      return [...items, ..._orphanInventory(countryCode, stock, products)];
     }
     return _localStore.loadInventory(countryCode);
   }
+
+  // ── NUEVO: stock de productos que ya no están en el catálogo ────────────
+  // Propósito: conservar el stock de un producto desactivado en Firestore. Sin
+  //            esto desaparecía de la lista y el siguiente guardado lo ponía en 0.
+  // Depende de: LocalStore.loadInventory (el producto va embebido en Hive).
+  // No modifica: el resultado para productos que siguen en el catálogo.
+  List<InventoryItem> _orphanInventory(
+    String countryCode,
+    Map<String, int> stock,
+    List<Product> catalog,
+  ) {
+    final catalogIds = {for (final product in catalog) product.id};
+    final missing = stock.entries
+        .where((entry) => entry.value > 0 && !catalogIds.contains(entry.key))
+        .toList();
+    if (missing.isEmpty) return const [];
+    final embedded = {
+      for (final item in _localStore.loadInventory(countryCode))
+        item.product.id: item.product,
+    };
+    return [
+      for (final entry in missing)
+        if (embedded[entry.key] != null)
+          InventoryItem(product: embedded[entry.key]!, quantity: entry.value),
+    ];
+  }
+
+  // ── NUEVO: movimientos solo con migración validada ──────────────────────
+  // Propósito: mientras la migración Hive→SQLite no está validada, el
+  //            inventario se lee de Hive; registrar movimientos en ese estado
+  //            duplicaba el saldo inicial en cada reintento de migración.
+  // Depende de: OperationalDatabase.isMigrationValidated.
+  // No modifica: el comportamiento una vez validada la migración.
+  Future<bool> _canRecordMovements(OperationalDatabase db) =>
+      db.isMigrationValidated;
 
   @override
   Future<void> saveInventory(
@@ -181,10 +240,24 @@ class ProductRepositoryImpl implements ProductRepository {
     String? relatedId,
     String? reason,
   }) async {
-    await operationalDatabase?.reconcileInventory(countryCode, inventory, movementType, relatedId: relatedId, reason: reason);
-    await _localStore.saveInventory(countryCode, inventory);
-    final payload = _localStore.rawOperationalValue('inventory', countryCode);
-    if (payload != null) await operationalDatabase?.writeSnapshot('inventory', countryCode, payload);
+    final inventoryPayload = _localStore.encodeInventoryPayload(inventory);
+    final db = operationalDatabase;
+    if (db != null) {
+      // SQLite primero y en una sola transacción; Hive queda como réplica.
+      await db.commitInventoryAndSnapshots(
+        countryCode,
+        desired: inventory,
+        type: movementType,
+        recordMovements: await _canRecordMovements(db),
+        relatedId: relatedId,
+        reason: reason,
+        snapshots: {'inventory': inventoryPayload},
+      );
+    }
+    await _localStore.saveRawOperationalValues(
+      countryCode,
+      inventoryPayload: inventoryPayload,
+    );
   }
 
   @override
@@ -195,11 +268,13 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
+  @Deprecated('Escribe solo en Hive, sin movimientos ni snapshots de SQLite. Usa saveSalesAndInventory.')
   Future<void> registerSale(
     String countryCode,
     List<InventoryItem> inventory,
     Sale sale,
   ) {
+    // ignore: deprecated_member_use_from_same_package
     return _localStore.registerSale(countryCode, inventory, sale);
   }
 
@@ -213,13 +288,27 @@ class ProductRepositoryImpl implements ProductRepository {
     String? reason,
     bool recordInventoryMovement = true,
   }) async {
-    if (recordInventoryMovement) {
-      await operationalDatabase?.reconcileInventory(countryCode, inventory, movementType, relatedId: relatedId, reason: reason);
+    final salesPayload = _localStore.encodeSalesPayload(sales);
+    final inventoryPayload = _localStore.encodeInventoryPayload(inventory);
+    final db = operationalDatabase;
+    if (db != null) {
+      // Movimientos + snapshots de ventas e inventario en una sola transacción:
+      // una interrupción ya no deja stock descontado sin su venta.
+      await db.commitInventoryAndSnapshots(
+        countryCode,
+        desired: inventory,
+        type: movementType,
+        recordMovements:
+            recordInventoryMovement && await _canRecordMovements(db),
+        relatedId: relatedId,
+        reason: reason,
+        snapshots: {'sales': salesPayload, 'inventory': inventoryPayload},
+      );
     }
-    await _localStore.saveSalesAndInventory(countryCode, inventory, sales);
-    final salesPayload = _localStore.rawOperationalValue('sales', countryCode);
-    final inventoryPayload = _localStore.rawOperationalValue('inventory', countryCode);
-    if (salesPayload != null) await operationalDatabase?.writeSnapshot('sales', countryCode, salesPayload);
-    if (inventoryPayload != null) await operationalDatabase?.writeSnapshot('inventory', countryCode, inventoryPayload);
+    await _localStore.saveRawOperationalValues(
+      countryCode,
+      inventoryPayload: inventoryPayload,
+      salesPayload: salesPayload,
+    );
   }
 }

@@ -401,7 +401,7 @@ class _SaleStatusBadge extends StatelessWidget {
     final color = completed ? const Color(0xFF238A53) : AppColors.danger;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(12)),
       child: Text(
         completed ? 'Completada' : 'Cancelada',
         style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w800),
@@ -471,7 +471,7 @@ class _NotesHistoryState extends State<_NotesHistory> {
                     selected: filter == entry.key,
                     onSelected: (_) => setState(() => filter = entry.key),
                   ),
-                )).toList(),
+                ),).toList(),
           ),
         ),
         const SizedBox(height: 10),
@@ -498,7 +498,7 @@ class _NotesHistoryState extends State<_NotesHistory> {
                   }
                 },
                 onEdit: () => _editNote(context, note: note),
-              )),
+              ),),
       ],
     );
   }
@@ -522,7 +522,7 @@ class _NotesHistoryState extends State<_NotesHistory> {
                       .toList(),
                   onChanged: (value) => setDialogState(() => method = value ?? method),
                 ),
-              ]),
+              ],),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('CANCELAR')),
                 FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('GUARDAR')),
@@ -531,19 +531,23 @@ class _NotesHistoryState extends State<_NotesHistory> {
           ),
         ) ??
         false;
+    // El controlador se libera después de la animación de cierre del diálogo,
+    // igual que en los demás diálogos de la app.
+    final text = controller.text;
+    Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
     if (!save || !context.mounted) return;
-    if (controller.text.trim().isEmpty) {
+    if (text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escribe una nota antes de guardar.')));
       return;
     }
     if (note == null) {
       await AppScope.of(context).addManualNote(
         customerId: widget.customer.id,
-        text: controller.text,
+        text: text,
         contactMethod: method,
       );
     } else {
-      await AppScope.of(context).updateFollowUpNote(note, text: controller.text, contactMethod: method);
+      await AppScope.of(context).updateFollowUpNote(note, text: text, contactMethod: method);
     }
   }
 }
@@ -588,7 +592,7 @@ class _FollowUpNoteCard extends StatelessWidget {
               Container(
                 width: 38,
                 height: 38,
-                decoration: BoxDecoration(color: color.withOpacity(.11), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: color.withValues(alpha: .11), borderRadius: BorderRadius.circular(10)),
                 child: Icon(icon, color: color, size: 20),
               ),
               const SizedBox(width: 10),
@@ -664,7 +668,7 @@ class _MetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        decoration: BoxDecoration(color: color.withOpacity(.09), borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: color.withValues(alpha: .09), borderRadius: BorderRadius.circular(10)),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -694,7 +698,7 @@ class _Summary extends StatelessWidget {
           Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
           const SizedBox(height: 3),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
-        ]),
+        ],),
       );
 }
 
@@ -703,7 +707,7 @@ BoxDecoration _cardDecoration() => BoxDecoration(
       borderRadius: BorderRadius.circular(14),
       border: Border.all(color: AppColors.line),
       boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(.025), blurRadius: 7, offset: const Offset(0, 2)),
+        BoxShadow(color: Colors.black.withValues(alpha: .025), blurRadius: 7, offset: const Offset(0, 2)),
       ],
     );
 

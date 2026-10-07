@@ -1,8 +1,8 @@
-import 'dart:math';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -14,6 +14,7 @@ import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
 import 'follow_up_settings_screen.dart';
+import '../../core/errors/friendly_error.dart';
 
 class DataTransferScreen extends StatefulWidget {
   const DataTransferScreen({super.key});
@@ -27,8 +28,18 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
   bool obscurePassword = true;
   static const labels = {
     'inventory': 'Inventario', 'sales': 'Ventas', 'clients': 'Clientes',
-    'followups': 'Seguimientos y notas', 'simulations': 'Simulaciones', 'config': 'Configuracion local',
+    'followups': 'Seguimientos y notas', 'simulations': 'Simulaciones', 'config': 'Configuración local',
   };
+
+  // CAMPO NUEVO: _privacyRequired
+  // Motivo: consultar una sola vez si se debe mostrar "Privacidad de anuncios".
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  Future<bool>? _privacyRequired;
+
+  @override void didChangeDependencies() {
+    super.didChangeDependencies();
+    _privacyRequired ??= AppScope.adsOf(context).privacyOptionsRequired();
+  }
 
   @override void dispose() { password.dispose(); super.dispose(); }
 
@@ -43,19 +54,19 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       ),
       Expanded(child: SafeArea(top: false, child: ListView(padding: const EdgeInsets.fromLTRB(18, 18, 18, 28), children: [
         const Text('Datos incluidos', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-        const Text('Las dependencias necesarias se agregan automaticamente.', style: TextStyle(color: AppColors.muted)),
+        const Text('Las dependencias necesarias se agregan automáticamente.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 8),
         ...labels.entries.map((entry) => CheckboxListTile(
           value: modules.contains(entry.key), title: Text(entry.value), contentPadding: EdgeInsets.zero,
           onChanged: busy ? null : (value) => setState(() => value == true ? modules.add(entry.key) : modules.remove(entry.key)),
-        )),
+        ),),
         TextField(
           controller: password,
           obscureText: obscurePassword,
           enableSuggestions: false,
           autocorrect: false,
           decoration: InputDecoration(
-            labelText: 'Contraseña (minimo 8 caracteres)',
+            labelText: 'Contraseña (mínimo 8 caracteres)',
             prefixIcon: const Icon(Icons.lock_outline),
             helperText: 'Se ignorarán espacios al inicio y al final.',
             suffixIcon: IconButton(
@@ -87,9 +98,24 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         ),
         OutlinedButton.icon(onPressed: busy ? null : _import, icon: const Icon(Icons.restore), label: const Text('IMPORTAR CON VISTA PREVIA')),
         OutlinedButton.icon(onPressed: busy ? null : () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FollowUpSettingsScreen())), icon: const Icon(Icons.tune), label: const Text('CONFIGURAR SEGUIMIENTO')),
+        // ── NUEVO: acceso a "Privacidad de anuncios" ─────────────────────
+        // Propósito: permitir cambiar el consentimiento de anuncios donde la
+        //            ley lo exige (Europa/Reino Unido). En otros países no se ve.
+        // Depende de: AppAdService.privacyOptionsRequired/showPrivacyOptions.
+        // No modifica: las demás acciones de esta pantalla.
+        FutureBuilder<bool>(
+          future: _privacyRequired,
+          builder: (context, snapshot) => snapshot.data == true
+              ? OutlinedButton.icon(
+                  onPressed: busy ? null : () => AppScope.adsOf(context).showPrivacyOptions(),
+                  icon: const Icon(Icons.privacy_tip_outlined),
+                  label: const Text('PRIVACIDAD DE ANUNCIOS'),
+                )
+              : const SizedBox.shrink(),
+        ),
         const Divider(height: 34),
-        const Text('Sincronizacion cercana manual', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-        const Text('Un dispositivo envia y el otro recibe. El sistema comparte un paquete cifrado por Bluetooth, Nearby Share, AirDrop o la opcion cercana disponible.', style: TextStyle(color: AppColors.muted)),
+        const Text('Sincronización cercana manual', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+        const Text('Un dispositivo envía y el otro recibe. El sistema comparte un paquete cifrado por Bluetooth, Nearby Share, AirDrop o la opción cercana disponible.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 12),
         FilledButton.tonalIcon(onPressed: busy ? null : _sendNearby, icon: const Icon(Icons.send_to_mobile), label: const Text('ENVIAR DATOS')),
         OutlinedButton.icon(onPressed: busy ? null : _receiveNearby, icon: const Icon(Icons.install_mobile), label: const Text('RECIBIR DATOS')),
@@ -99,8 +125,8 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
           margin: EdgeInsets.only(top: 16, bottom: 4),
           maxHeight: 72,
         ),
-      ]))),
-    ]),
+      ],),),),
+    ],),
   );
 
   Future<void> _saveBackup() async {
@@ -137,7 +163,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
             : 'Respaldo guardado correctamente.',
       );
     } catch (error) {
-      if (mounted) _message('No fue posible guardar el respaldo: $error');
+      if (mounted) _message('No fue posible guardar el respaldo: ${friendlyError(error)}');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -171,7 +197,7 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       } finally {
         if (await file.exists()) await file.delete();
       }
-    }, 'Respaldo compartido correctamente.');
+    }, 'Respaldo compartido correctamente.',);
   }
 
   Future<void> _import() async {
@@ -183,8 +209,8 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
   }
 
   Future<void> _sendNearby() async {
-    if (modules.isEmpty) { _message('Selecciona al menos un modulo.'); return; }
-    final code = (100000 + Random.secure().nextInt(900000)).toString();
+    if (modules.isEmpty) { _message('Selecciona al menos un módulo.'); return; }
+    final code = EncryptedBackupService.generatePairingCode();
     final root = await getTemporaryDirectory();
     final file = File(p.join(root.path, 'mi_lista_plus_sync.mlplus'));
     await _run(() async {
@@ -196,13 +222,13 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
         );
         if (!mounted) return;
         await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-          title: const Text('Codigo de emparejamiento'),
-          content: Text('$code\n\nComunica este codigo al dispositivo receptor. Solo sirve para este paquete.', textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+          title: const Text('Código de emparejamiento'),
+          content: SelectableText('$code\n\nComunica este código al dispositivo receptor. Solo sirve para este paquete.', textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
           actions: [ElevatedButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CONTINUAR'))],
-        ));
+        ),);
         await Share.shareXFiles(
           [XFile(file.path)],
-          subject: 'Sincronizacion Mi Lista+',
+          subject: 'Sincronización Mi Lista+',
         );
         if (mounted) {
           await AppScope.adsOf(context).recordImportantAction(
@@ -212,21 +238,25 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
       } finally {
         if (await file.exists()) await file.delete();
       }
-    }, 'Paquete enviado al selector del sistema.');
+    }, 'Paquete enviado al selector del sistema.',);
   }
 
   Future<void> _receiveNearby() async {
     final codeController = TextEditingController();
     final code = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
       title: const Text('Recibir datos'),
-      content: TextField(controller: codeController, keyboardType: TextInputType.number, maxLength: 6, decoration: const InputDecoration(labelText: 'Codigo de emparejamiento')),
+      content: TextField(controller: codeController, keyboardType: TextInputType.visiblePassword, textCapitalization: TextCapitalization.characters, autocorrect: false, enableSuggestions: false, maxLength: 12, decoration: const InputDecoration(labelText: 'Código de emparejamiento', helperText: 'Ejemplo: K7PX-M3QD-9R')),
       actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, codeController.text), child: const Text('SELECCIONAR ARCHIVO'))],
-    ));
+    ),);
     Future<void>.delayed(
       const Duration(milliseconds: 400),
       codeController.dispose,
     );
-    if (code == null || code.length != 6 || !mounted) return;
+    if (code == null || !mounted) return;
+    if (!EncryptedBackupService.isValidPairingCode(code)) {
+      _message('El código de emparejamiento no es válido. Revisa que esté completo.');
+      return;
+    }
     final result = await FilePicker.platform.pickFiles(type: FileType.any);
     final path = result?.files.single.path;
     if (path != null && mounted) {
@@ -239,29 +269,33 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
 
   Future<void> _previewAndImport(String path, String secret) async {
     setState(() => busy = true);
+    // Se captura antes de los await: si el usuario sale de la pantalla durante
+    // la importación, el estado en memoria igual se recarga.
+    final state = AppScope.of(context);
+    final ads = AppScope.adsOf(context);
     try {
-      final preview = await AppScope.of(context).backupService.preview(path, secret);
+      final preview = await state.backupService.preview(path, secret);
       if (!mounted) return;
       final mode = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
         title: const Text('Vista previa'),
-        content: Text('Fecha: ${preview.exportedAt.toLocal()}\nModulos: ${preview.modules.map((item) => labels[item] ?? item).join(', ')}\nRegistros: ${preview.counts.values.fold<int>(0, (sum, value) => sum + value)}\n\nCombinar conserva lo existente. Reemplazar sustituye los modulos incluidos.'),
+        content: Text('Fecha: ${DateFormat('d MMM y, h:mm a', 'es_CO').format(preview.exportedAt.toLocal())}\nMódulos: ${preview.modules.map((item) => labels[item] ?? item).join(', ')}\nRegistros: ${preview.counts.values.fold<int>(0, (sum, value) => sum + value)}\n\nCombinar conserva lo existente. Reemplazar sustituye los modulos incluidos.'),
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), OutlinedButton(onPressed: () => Navigator.pop(dialogContext, 'merge'), child: const Text('COMBINAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, 'replace'), child: const Text('REEMPLAZAR'))],
-      ));
+      ),);
       if (mode == null || !mounted) return;
-      final counts = await AppScope.of(context).backupService.importPreview(preview, replace: mode == 'replace');
-      await AppScope.of(context).reloadAfterImport();
+      final counts = await state.backupService.importPreview(preview, replace: mode == 'replace');
+      await state.reloadAfterImport();
       if (mounted) {
-        await AppScope.adsOf(context).recordImportantAction(
+        await ads.recordImportantAction(
           ImportantAdAction.backupImported,
         );
       }
       if (!mounted) return;
-      _message('Importacion completada: ${counts.values.fold<int>(0, (sum, value) => sum + value)} registros.');
-    } catch (error) { if (mounted) _message('$error'); } finally { if (mounted) setState(() => busy = false); }
+      _message('Importación completada: ${counts.values.fold<int>(0, (sum, value) => sum + value)} registros.');
+    } catch (error) { if (mounted) _message(friendlyError(error)); } finally { if (mounted) setState(() => busy = false); }
   }
 
   bool _valid() => modules.isNotEmpty && _validPassword();
   bool _validPassword() { if (password.text.trim().length >= 8) return true; _message('La contraseña debe tener al menos 8 caracteres, sin contar espacios externos.'); return false; }
-  Future<void> _run(Future<void> Function() action, String success) async { setState(() => busy = true); try { await action(); if (mounted) _message(success); } catch (error) { if (mounted) _message('$error'); } finally { if (mounted) setState(() => busy = false); } }
+  Future<void> _run(Future<void> Function() action, String success) async { setState(() => busy = true); try { await action(); if (mounted) _message(success); } catch (error) { if (mounted) _message(friendlyError(error)); } finally { if (mounted) setState(() => busy = false); } }
   void _message(String value) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
 }

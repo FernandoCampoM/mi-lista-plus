@@ -89,11 +89,83 @@ class AppAdService extends ChangeNotifier {
     // accidentalmente en IDs de prueba o defaults habilitados.
     if (_isInitialized || !_remoteConfigReady) return;
     try {
+      // Consentimiento (RGPD): el SDK de Google solo muestra el formulario a
+      // usuarios de Europa y Reino Unido; en el resto no aparece nada.
+      if (!await _gatherConsent()) return;
       await MobileAds.instance.initialize();
       _isInitialized = true;
       unawaited(_loadInterstitial());
     } catch (_) {
       _isInitialized = false;
+    }
+  }
+
+  // ── NUEVO: consentimiento de anuncios (UMP) ─────────────────────────────
+  // Propósito: cumplir el requisito de Google de pedir consentimiento a los
+  //            usuarios del EEE, Reino Unido y Suiza antes de cargar anuncios.
+  // Depende de: ConsentInformation / ConsentForm de google_mobile_ads y del
+  //            mensaje RGPD publicado en AdMob > Privacidad y mensajería.
+  // No modifica: la lógica de Remote Config, banners ni intersticiales.
+  Future<bool> _gatherConsent() async {
+    final completer = Completer<void>();
+    try {
+      _requestConsentUpdate(completer);
+    } catch (_) {
+      if (!completer.isCompleted) completer.complete();
+    }
+    await completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {},
+    );
+    try {
+      return await ConsentInformation.instance.canRequestAds();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _requestConsentUpdate(Completer<void> completer) {
+    ConsentInformation.instance.requestConsentInfoUpdate(
+      ConsentRequestParameters(),
+      () async {
+        try {
+          await ConsentForm.loadAndShowConsentFormIfRequired((_) {
+            if (!completer.isCompleted) completer.complete();
+          });
+        } catch (_) {
+          // Un fallo del formulario se trata igual que un fallo de red.
+        } finally {
+          if (!completer.isCompleted) completer.complete();
+        }
+      },
+      (_) {
+        // Sin red se usa el último consentimiento conocido.
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+  }
+
+  /// Verdadero solo donde la ley exige ofrecer "Privacidad de anuncios".
+  Future<bool> privacyOptionsRequired() async {
+    try {
+      return await ConsentInformation.instance
+              .getPrivacyOptionsRequirementStatus() ==
+          PrivacyOptionsRequirementStatus.required;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Abre el formulario de Google para cambiar el consentimiento.
+  Future<void> showPrivacyOptions() async {
+    final completer = Completer<void>();
+    await ConsentForm.showPrivacyOptionsForm((_) {
+      if (!completer.isCompleted) completer.complete();
+    });
+    await completer.future;
+    if (!_isInitialized) {
+      await initialize();
+      notifyListeners();
     }
   }
 
@@ -228,10 +300,30 @@ class AppAdService extends ChangeNotifier {
       _remoteConfigReady = true;
       return true;
     } catch (_) {
+      // Si ya hubo una consulta exitosa antes, se usan los últimos valores
+      // activados (siguen guardados en el dispositivo): un fallo de red o un
+      // límite de Firebase ya no apaga toda la publicidad. Una instalación
+      // nueva sin red sigue sin anuncios, igual que antes.
+      if (_hasActivatedValues(remoteConfig)) {
+        _remoteConfigReady = true;
+        return true;
+      }
       // Si Remote Config no está disponible, la publicidad permanece apagada.
       // El catálogo y el resto de la app siguen funcionando offline.
       _remoteConfigReady = false;
       notifyListeners();
+      return false;
+    }
+  }
+
+  // ── NUEVO: ¿hay valores de Remote Config de una sesión anterior? ────────
+  // Propósito: distinguir "sin red pero ya configurado" de "nunca configurado".
+  // Depende de: FirebaseRemoteConfig.lastFetchTime.
+  // No modifica: los valores por defecto ni el kill-switch ads_enabled.
+  bool _hasActivatedValues(FirebaseRemoteConfig remoteConfig) {
+    try {
+      return remoteConfig.lastFetchTime.isAfter(DateTime.utc(2000));
+    } catch (_) {
       return false;
     }
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide Simulation;
 import 'package:flutter/services.dart';
 
@@ -17,6 +19,7 @@ import '../widgets/product_avatar.dart';
 import '../widgets/quantity_control.dart';
 import '../widgets/customer_form_dialog.dart';
 import 'sale_product_picker_screen.dart';
+import '../../core/errors/friendly_error.dart';
 
 class RegisterSaleScreen extends StatefulWidget {
   const RegisterSaleScreen({
@@ -194,7 +197,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                                       ),
                                     ),
                                   ),
-                                ))
+                                ),)
                             .toList(),
                         items: customerOptions
                             .map(
@@ -220,8 +223,8 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                                           option.statusLabel,
                                           softWrap: true,
                                           style: TextStyle(fontSize: 11, color: _customerStatusColor(option)),
-                                        )),
-                                      ]),
+                                        ),),
+                                      ],),
                                     ],
                                   ),
                                 ),
@@ -254,8 +257,8 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                     Expanded(child: Text(
                       selectedCustomerOption.statusLabel,
                       style: TextStyle(color: _customerStatusColor(selectedCustomerOption), fontSize: 12, fontWeight: FontWeight.w700),
-                    )),
-                  ]),
+                    ),),
+                  ],),
                 ],
                 if (customerWarning != null) ...[
                   const SizedBox(height: 7),
@@ -363,7 +366,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
                   title: const Text('El cliente ya recibio el pedido'),
                   subtitle: Text(delivered
                       ? 'Entrega: ${_shortDate(deliveredAt ?? DateTime.now())}'
-                      : 'Quedara en Por confirmar entrega'),
+                      : 'Quedara en Por confirmar entrega',),
                   value: delivered,
                   onChanged: (value) => setState(() {
                     delivered = value;
@@ -597,12 +600,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
               deliveredAt: deliveredAt,
             );
       if (!mounted) return;
-      await AppScope.adsOf(context).recordImportantAction(
-        original == null
-            ? ImportantAdAction.saleRegistered
-            : ImportantAdAction.saleUpdated,
-      );
-      if (!mounted) return;
+      final ads = AppScope.adsOf(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -613,11 +611,17 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
         ),
       );
       Navigator.pop(context, sale);
+      // El anuncio va después de confirmar y cerrar, sin bloquear el flujo.
+      unawaited(ads.recordImportantAction(
+        original == null
+            ? ImportantAdAction.saleRegistered
+            : ImportantAdAction.saleUpdated,
+      ),);
     } catch (error) {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
+        SnackBar(content: Text(friendlyError(error))),
       );
     }
   }
@@ -652,7 +656,7 @@ class _RegisterSaleScreenState extends State<RegisterSaleScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo guardar el cliente: $error')),
+        SnackBar(content: Text('No se pudo guardar el cliente: ${friendlyError(error)}')),
       );
     }
   }

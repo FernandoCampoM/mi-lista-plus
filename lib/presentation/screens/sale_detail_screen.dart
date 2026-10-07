@@ -75,7 +75,8 @@ class SaleDetailScreen extends StatelessWidget {
                   leading: Icon(sale.isDelivered ? Icons.check_circle : Icons.local_shipping_outlined, color: sale.isDelivered ? AppColors.green : AppColors.orange),
                   title: Text(sale.isDelivered ? 'Pedido entregado' : 'Pendiente de confirmar entrega', style: const TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: sale.deliveredAt == null ? null : Text(_formatDate(sale.deliveredAt!)),
-                  trailing: !sale.isDelivered && sale.customerId != null
+                  // Una venta cancelada no se puede entregar.
+                  trailing: sale.isCompleted && !sale.isDelivered && sale.customerId != null
                       ? TextButton(
                           onPressed: () => _confirmDelivery(context, sale),
                           child: const Text('CONFIRMAR'),
@@ -494,7 +495,7 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(.12),
+        color: color.withValues(alpha: .12),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Text(

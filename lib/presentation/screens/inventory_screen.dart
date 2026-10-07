@@ -328,7 +328,7 @@ class _InventoryOverview extends StatelessWidget {
           query: searchQuery,
           name: item.product.name,
           code: item.product.code,
-        )).toList();
+        ),).toList();
     final totalPoints = inventory.fold<int>(
       0,
       (sum, item) => sum + item.product.points * item.quantity,
@@ -500,7 +500,7 @@ class _InventoryOverview extends StatelessWidget {
                                   ? 'Existencias (mayor a menor)'
                                   : productSortLabel(item),
                             ),
-                          ))
+                          ),)
                       .toList(),
                   onChanged: onSortChanged,
                 ),
@@ -552,13 +552,20 @@ class _InventoryOverview extends StatelessWidget {
 
   List<InventoryItem> _inactiveProducts60Days(List<InventoryItem> items, List<Sale> sales) {
     final cutoff = DateTime.now().subtract(const Duration(days: 60));
+    // Una sola pasada por las ventas (antes se recorrían todas por cada
+    // producto en cada reconstrucción, incluso al escribir en la búsqueda).
+    final lastSaleByProduct = <String, DateTime>{};
+    for (final sale in sales.where((sale) => sale.isCompleted)) {
+      for (final line in sale.items) {
+        final previous = lastSaleByProduct[line.productId];
+        if (previous == null || sale.soldAt.isAfter(previous)) {
+          lastSaleByProduct[line.productId] = sale.soldAt;
+        }
+      }
+    }
     final result = <InventoryItem>[];
     for (final item in items.where((item) => item.quantity > 0)) {
-      DateTime? lastSale;
-      for (final sale in sales.where((sale) => sale.isCompleted)) {
-        if (!sale.items.any((line) => line.productId == item.product.id)) continue;
-        if (lastSale == null || sale.soldAt.isAfter(lastSale)) lastSale = sale.soldAt;
-      }
+      final lastSale = lastSaleByProduct[item.product.id];
       if (lastSale == null || lastSale.isBefore(cutoff)) result.add(item);
     }
     result.sort((a, b) => a.product.name.toLowerCase().compareTo(b.product.name.toLowerCase()));
@@ -810,7 +817,7 @@ class _InventoryProductCard extends StatelessWidget {
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(8)),
               child: Text(status, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
             ),
           ],
@@ -1161,7 +1168,7 @@ class _KpiCard extends StatelessWidget {
           Container(
             width: 40,
             height: 40,
-            decoration: BoxDecoration(color: iconColor.withOpacity(.11), borderRadius: BorderRadius.circular(11)),
+            decoration: BoxDecoration(color: iconColor.withValues(alpha: .11), borderRadius: BorderRadius.circular(11)),
             child: Icon(icon, color: iconColor, size: 22),
           ),
           const SizedBox(width: 9),
@@ -1182,7 +1189,7 @@ class _KpiCard extends StatelessWidget {
                     TextSpan(children: [
                       TextSpan(text: trendText, style: TextStyle(color: trendColor, fontWeight: FontWeight.w800)),
                       if (trendSuffix != null) TextSpan(text: '  $trendSuffix', style: const TextStyle(color: AppColors.muted)),
-                    ]),
+                    ],),
                     style: const TextStyle(fontSize: 9.5),
                   ),
                 ],
@@ -1221,7 +1228,7 @@ class _PointsProgressCard extends StatelessWidget {
               Container(
                 width: 38,
                 height: 38,
-                decoration: BoxDecoration(color: AppColors.purple.withOpacity(.1), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: AppColors.purple.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
                 child: const Icon(Icons.track_changes_outlined, color: AppColors.purple),
               ),
               const SizedBox(width: 10),
@@ -1275,7 +1282,7 @@ class _CategorySalesCard extends StatelessWidget {
           const Row(children: [
             Expanded(child: Text('Ventas por categoría', style: _sectionTitle)),
             Text('Ver detalle ›', style: TextStyle(fontSize: 10, color: AppColors.muted)),
-          ]),
+          ],),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -1379,7 +1386,7 @@ class _TopThreeProductsCard extends StatelessWidget {
           const Row(children: [
             Expanded(child: Text('Top 3 productos más vendidos', style: _sectionTitle)),
             Text('Ver todo ›', style: TextStyle(fontSize: 10, color: AppColors.muted)),
-          ]),
+          ],),
           const SizedBox(height: 8),
           if (products.isEmpty)
             const Padding(padding: EdgeInsets.all(16), child: Center(child: Text('Sin ventas en este mes.')))
@@ -1482,7 +1489,7 @@ class _StatusBadge extends StatelessWidget {
     final color = completed ? const Color(0xFF238A53) : AppColors.danger;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(12)),
       child: Text(completed ? 'Completada' : 'Cancelada', style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w800)),
     );
   }

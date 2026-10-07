@@ -62,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   Text(error!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                   const SizedBox(height: 16),
                   FilledButton(onPressed: loading ? null : _bootstrap, child: const Text('REINTENTAR')),
-                ]),
+                ],),
               ),
       ),
     );

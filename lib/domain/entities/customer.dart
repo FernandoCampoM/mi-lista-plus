@@ -134,7 +134,7 @@ class Customer {
             .map((value) => ConsentScope.values.firstWhere(
                   (item) => item.name == value,
                   orElse: () => ConsentScope.phone,
-                ))
+                ),)
             .toSet(),
         consentRevokedAt: _date(json['consentRevokedAt']),
         allowCalls: json['allowCalls'] as bool? ?? true,
