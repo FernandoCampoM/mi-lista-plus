@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import '../../data/datasources/local_store.dart';
 import '../../data/datasources/operational_database.dart';
 import '../../domain/entities/customer.dart';
+import '../../domain/entities/follow_up.dart';
+import '../../domain/entities/follow_up_note.dart';
 import '../../domain/entities/sale.dart';
 import '../../presentation/state/app_state.dart';
 
@@ -27,6 +29,9 @@ import '../../presentation/state/app_state.dart';
 //   households/{uid}/sellers/{vendedor}/sales/{id}      ← ventas por vendedor
 //   households/{uid}/sellers/{vendedor}/customers/{id}  ← clientes por vendedor
 //   households/{uid}/meta/state                         ← quién inicializó
+// Fase 2 (también por vendedor):
+//   sellers/{vendedor}/follow_ups/{id}, follow_up_notes/{id},
+//   settings/config (hora y meta), product_config/{país_producto}
 class CloudSyncService extends ChangeNotifier {
   CloudSyncService({
     required AppState state,
@@ -55,6 +60,9 @@ class CloudSyncService extends ChangeNotifier {
   static const _householdKey = 'cloud_sync_household';
   static const _lastSyncKey = 'cloud_sync_last_at';
   static const _cursorPrefix = 'cloud_sync_cursor_';
+  // Fase 2: se suben una vez los seguimientos/config que ya existían.
+  static const _phaseKey = 'cloud_sync_phase';
+  static const _phase2Collections = ['follow_ups', 'follow_up_notes', 'settings', 'product_config'];
   static const _batchSize = 400;
 
   final AppState _state;
@@ -170,6 +178,11 @@ class CloudSyncService extends ChangeNotifier {
     for (final name in const ['movements', 'sales', 'customers']) {
       await _db.writeSetting('$_cursorPrefix$name', '$cursor');
     }
+    // Fase 2: seguimientos, notas y configuración se bajan completos.
+    for (final name in _phase2Collections) {
+      await _db.writeSetting('$_cursorPrefix$name', '0');
+    }
+    await _db.writeSetting(_phaseKey, null);
     needsSignIn = false;
     onProgress?.call('Sincronización activa.');
     await _start();
@@ -181,7 +194,9 @@ class CloudSyncService extends ChangeNotifier {
     await _stopListeners();
     _active = false;
     _state.cloudSyncActive = false;
+    _db.recordSyncChanges = false;
     await _db.writeSetting(_enabledKey, null);
+    await _db.writeSetting(_phaseKey, null);
     await _db.clearAllSync();
     try {
       await _auth.signOut();
@@ -209,7 +224,10 @@ class CloudSyncService extends ChangeNotifier {
     await _stopListeners();
     _active = true;
     _state.cloudSyncActive = true;
+    _db.recordSyncChanges = true;
+    await _bootstrapPhase2();
     _subscriptions.add(_state.localChanges.listen((_) => unawaited(_push())));
+    _subscriptions.add(_db.syncRecorded.listen((_) => unawaited(_push())));
     await _listen('movements', _movements, (docs) async {
       await _state.applyRemoteMovements([
         for (final data in docs)
@@ -218,6 +236,10 @@ class CloudSyncService extends ChangeNotifier {
     });
     await _listen('sales', _sellerCollection('sales'), (docs) => _applySaleDocs(docs));
     await _listen('customers', _sellerCollection('customers'), (docs) => _applyCustomerDocs(docs));
+    await _listen('follow_ups', _sellerCollection('follow_ups'), (docs) => _applyFollowUpDocs(docs));
+    await _listen('follow_up_notes', _sellerCollection('follow_up_notes'), (docs) => _applyFollowUpDocs(docs, notes: true));
+    await _listen('settings', _sellerCollection('settings'), _applySettingsDocs);
+    await _listen('product_config', _sellerCollection('product_config'), _applyProductConfigDocs);
     notifyListeners();
     unawaited(_push());
   }
@@ -350,6 +372,8 @@ class CloudSyncService extends ChangeNotifier {
             'deviceId': _db.deviceId,
             'serverUpdatedAt': FieldValue.serverTimestamp(),
           });
+        } else {
+          await _addPhase2Write(batch, row['entity'] as String, id);
         }
       }
       await batch.commit();
@@ -423,6 +447,144 @@ class CloudSyncService extends ChangeNotifier {
       }
     }
     await _state.applyRemoteCustomers(customers);
+  }
+
+
+  // ── NUEVO: Fase 2 · seguimientos, notas y configuración ────────────────
+  // Propósito: subir/bajar los seguimientos, notas, hora de recordatorio,
+  //            meta de puntos y duración por producto de cada vendedor.
+  // Depende de: OperationalDatabase (registro de cambios y applyRemote*),
+  //            AppState.applyRemoteFollowUpData/Settings/ProductConfig.
+  // No modifica: la sincronización de inventario, ventas y clientes.
+
+  /// Celulares activados antes de la Fase 2: sube una sola vez lo que ya
+  /// tenían. Las colecciones nuevas se bajan completas (cursor en 0).
+  Future<void> _bootstrapPhase2() async {
+    if (await _db.readSetting(_phaseKey) == '2') return;
+    for (final item in await _db.loadFollowUps()) {
+      await _db.enqueueSync('follow_up', item.id);
+    }
+    for (final note in await _db.loadFollowUpNotes()) {
+      await _db.enqueueSync('follow_up_note', note.id);
+    }
+    await _db.enqueueSync('settings', 'config');
+    for (final row in await _db.productConfigRows()) {
+      await _db.enqueueSync(
+        'product_config',
+        OperationalDatabase.productConfigId(
+          row['country_code'] as String,
+          row['product_id'] as String,
+        ),
+      );
+    }
+    await _db.writeSetting(_phaseKey, '2');
+  }
+
+  Future<void> _addPhase2Write(WriteBatch batch, String entity, String id) async {
+    final common = {
+      'deviceId': _db.deviceId,
+      'serverUpdatedAt': FieldValue.serverTimestamp(),
+    };
+    switch (entity) {
+      case 'follow_up':
+        final item = (await _db.loadFollowUps()).where((entry) => entry.id == id).firstOrNull;
+        if (item == null) return;
+        batch.set(_sellerCollection('follow_ups').doc(id), {
+          'payload': jsonEncode(item.toJson()), ...common,
+        });
+      case 'follow_up_note':
+        final note = (await _db.loadFollowUpNotes()).where((entry) => entry.id == id).firstOrNull;
+        if (note == null) return;
+        batch.set(_sellerCollection('follow_up_notes').doc(id), {
+          'payload': jsonEncode(note.toJson()), ...common,
+        });
+      case 'settings':
+        batch.set(_sellerCollection('settings').doc('config'), {
+          'reminderHour': await _db.reminderHour,
+          'monthlyPointsGoal': await _db.monthlyPointsGoal,
+          ...common,
+        });
+      case 'product_config':
+        final separator = id.indexOf('_');
+        if (separator <= 0) return;
+        final row = await _db.productConfigRow(id.substring(0, separator), id.substring(separator + 1));
+        if (row == null) return;
+        batch.set(_sellerCollection('product_config').doc(id), {...row, ...common});
+    }
+  }
+
+  Future<void> _applyFollowUpDocs(
+    List<Map<String, dynamic>> docs, {
+    bool notes = false,
+  }) async {
+    final followUps = <FollowUp>[];
+    final noteItems = <FollowUpNote>[];
+    for (final data in docs) {
+      if (data['deviceId'] == _db.deviceId) continue;
+      final payload = data['payload'] as String?;
+      if (payload == null) continue;
+      try {
+        final json = jsonDecode(payload) as Map<String, dynamic>;
+        if (notes) {
+          noteItems.add(FollowUpNote.fromJson(json));
+        } else {
+          followUps.add(FollowUp.fromJson(json));
+        }
+      } catch (error) {
+        developer.log('Seguimiento remoto inválido omitido', name: 'mi_lista_plus.sync', error: error);
+      }
+    }
+    var missing = await _state.applyRemoteFollowUpData(followUps: followUps, notes: noteItems);
+    if (missing.isEmpty) return;
+    // El seguimiento llegó antes que su cliente: se baja el cliente y se
+    // reintenta una vez.
+    final customers = <Map<String, dynamic>>[];
+    for (final id in missing) {
+      final doc = await _sellerCollection('customers').doc(id).get();
+      final data = doc.data();
+      if (data != null) customers.add(data);
+    }
+    await _applyCustomerDocs(customers, skipOwnDevice: false);
+    missing = await _state.applyRemoteFollowUpData(followUps: followUps, notes: noteItems);
+    if (missing.isNotEmpty) {
+      developer.log('Seguimientos sin cliente omitidos: $missing', name: 'mi_lista_plus.sync');
+    }
+  }
+
+  Future<void> _applySettingsDocs(List<Map<String, dynamic>> docs) async {
+    for (final data in docs) {
+      if (data['deviceId'] == _db.deviceId) continue;
+      await _state.applyRemoteSettings(
+        reminderHour: (data['reminderHour'] as num?)?.toInt(),
+        monthlyPointsGoal: (data['monthlyPointsGoal'] as num?)?.toInt(),
+      );
+    }
+  }
+
+  Future<void> _applyProductConfigDocs(List<Map<String, dynamic>> docs) async {
+    await _state.applyRemoteProductConfig([
+      for (final data in docs)
+        if (data['deviceId'] != _db.deviceId &&
+            data['product_id'] is String &&
+            data['country_code'] is String)
+          Map<String, Object?>.from(data),
+    ]);
+  }
+
+  /// Importa un respaldo con la sincronización activa: solo seguimientos,
+  /// notas, configuración por producto, simulaciones y clientes faltantes.
+  /// Lo importado se sube a la nube como de este vendedor.
+  Future<int> importBackupForSync(Map<String, dynamic> payload) async {
+    await _state.backupService.createAutomaticBackup();
+    final inserted = await _db.importModulesForSync(payload);
+    for (final entry in inserted.entries) {
+      for (final id in entry.value) {
+        await _db.enqueueSync(entry.key, id);
+      }
+    }
+    await _state.reloadAfterImport();
+    unawaited(_push());
+    return inserted.values.fold<int>(0, (sum, ids) => sum + ids.length);
   }
 
   Map<String, Object?> _rowFromDoc(Map<String, dynamic> data) =>

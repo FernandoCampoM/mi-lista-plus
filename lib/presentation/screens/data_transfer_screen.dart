@@ -13,6 +13,8 @@ import '../../core/services/encrypted_backup_service.dart';
 import '../state/app_scope.dart';
 import '../widgets/adaptive_banner_ad.dart';
 import '../widgets/app_header.dart';
+import '../../core/services/cloud_sync_service.dart';
+import '../widgets/confirm_action_dialog.dart';
 import 'family_sync_screen.dart';
 import 'follow_up_settings_screen.dart';
 import '../../core/errors/friendly_error.dart';
@@ -305,20 +307,37 @@ class _DataTransferScreenState extends State<DataTransferScreen> {
     try {
       final preview = await state.backupService.preview(path, secret);
       if (!mounted) return;
+      // ── NUEVO: importación segura con la sincronización familiar activa ─
+      // Propósito: recuperar seguimientos, notas, configuración, simulaciones
+      //            y clientes faltantes SIN tocar el inventario compartido ni
+      //            pisar las ventas de la nube; lo importado se sube.
+      // Depende de: CloudSyncService.importBackupForSync.
+      // No modifica: la importación normal (sin sincronización activa).
+      final sync = CloudSyncService.instance;
+      if (state.cloudSyncActive && sync != null) {
+        final confirmed = await confirmAction(
+          context,
+          title: 'Importar con sincronización activa',
+          message: 'Se recuperarán seguimientos, notas, configuración, '
+              'simulaciones y clientes que falten, y se subirán a la nube. '
+              'El inventario y las ventas NO se importan: ya vienen de la nube.',
+          confirmLabel: 'IMPORTAR',
+        );
+        if (!confirmed || !mounted) return;
+        final total = await sync.importBackupForSync(preview.payload);
+        if (mounted) {
+          await ads.recordImportantAction(ImportantAdAction.backupImported);
+        }
+        if (!mounted) return;
+        _message('Importación completada: $total registros nuevos.');
+        return;
+      }
       final mode = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
         title: const Text('Vista previa'),
         content: Text('Fecha: ${DateFormat('d MMM y, h:mm a', 'es_CO').format(preview.exportedAt.toLocal())}\nMódulos: ${preview.modules.map((item) => labels[item] ?? item).join(', ')}\nRegistros: ${preview.counts.values.fold<int>(0, (sum, value) => sum + value)}\n\nCombinar conserva lo existente. Reemplazar sustituye los modulos incluidos.'),
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCELAR')), OutlinedButton(onPressed: () => Navigator.pop(dialogContext, 'merge'), child: const Text('COMBINAR')), ElevatedButton(onPressed: () => Navigator.pop(dialogContext, 'replace'), child: const Text('REEMPLAZAR'))],
       ),);
       if (mode == null || !mounted) return;
-      // Con la sincronización familiar activa, REEMPLAZAR el inventario
-      // borraría los movimientos y desordenaría el de todos los celulares.
-      if (state.cloudSyncActive &&
-          mode == 'replace' &&
-          preview.modules.contains('inventory')) {
-        _message('Con la sincronización familiar activa no se puede REEMPLAZAR el inventario. Usa COMBINAR.');
-        return;
-      }
       final counts = await state.backupService.importPreview(preview, replace: mode == 'replace');
       await state.reloadAfterImport();
       if (mounted) {
