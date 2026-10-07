@@ -142,6 +142,22 @@ class EncryptedBackupService {
     return database.importModules(preview.payload, replace: replace);
   }
 
+  // ── NUEVO: respaldo automático bajo demanda ─────────────────────────────
+  // Propósito: respaldar todo antes de que la sincronización familiar
+  //            reemplace el inventario local por el de la nube.
+  // Depende de: exportToFile, localBackupSecret y la rotación existente.
+  // No modifica: importPreview (sigue creando su propio respaldo).
+  Future<void> createAutomaticBackup() async {
+    final root = await getApplicationSupportDirectory();
+    final path = p.join(root.path, '$_automaticPrefix${DateTime.now().millisecondsSinceEpoch}.mlplus');
+    await exportToFile(
+      modules: const {'inventory', 'sales', 'clients', 'followups', 'simulations', 'config'},
+      password: await database.localBackupSecret(),
+      path: path,
+    );
+    await _pruneAutomaticBackups(root);
+  }
+
   // ── NUEVO: rotación de respaldos automáticos ────────────────────────────
   // Propósito: conservar solo los 3 respaldos automáticos más recientes.
   // Depende de: el prefijo de nombre usado por importPreview.

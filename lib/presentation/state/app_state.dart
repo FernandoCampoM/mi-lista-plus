@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -361,6 +363,7 @@ class AppState extends ChangeNotifier {
 
     await _repository.saveInventory(country.code, next);
     inventory = await _repository.loadInventory(country.code);
+    _notifyLocalChange();
     notifyListeners();
   }
 
@@ -460,6 +463,7 @@ class AppState extends ChangeNotifier {
     );
     inventory = result.inventory;
     sales = nextSales;
+    await _markSaleChanged(sale.id, country.code);
     if (sale.isDelivered && sale.customerId != null) {
       await _createDeliveryFollowUps(sale);
     }
@@ -618,6 +622,7 @@ class AppState extends ChangeNotifier {
     );
     inventory = result.inventory;
     sales = nextSales;
+    await _markSaleChanged(updated.id, country.code);
     if (updated.isDelivered && updated.customerId != null) {
       await _createDeliveryFollowUps(updated);
     } else if (!updated.isDelivered) {
@@ -649,6 +654,7 @@ class AppState extends ChangeNotifier {
     );
     inventory = restoredInventory;
     sales = nextSales;
+    await _markSaleChanged(sale.id, country.code);
     await _cancelPendingFollowUpsForSale(sale.id);
     notifyListeners();
     return cancelled;
@@ -673,6 +679,7 @@ class AppState extends ChangeNotifier {
     );
     inventory = nextInventory;
     sales = nextSales;
+    await _markSaleChanged(sale.id, country.code);
     await _cancelPendingFollowUpsForSale(sale.id);
     notifyListeners();
   }
@@ -1033,6 +1040,7 @@ class AppState extends ChangeNotifier {
     final db = _operationalDatabase;
     if (db == null) throw StateError('La base local segura no esta disponible.');
     await db.saveCustomer(customer);
+    await _markCustomerChanged(customer.id);
     await _reloadCrm();
     await _ensureBirthdayFollowUps();
     notifyListeners();
@@ -1291,6 +1299,7 @@ class AppState extends ChangeNotifier {
       sale.countryCode, inventory, nextSales, recordInventoryMovement: false,
     );
     sales = nextSales;
+    await _markSaleChanged(updated.id, sale.countryCode);
     await _createDeliveryFollowUps(updated);
     notifyListeners();
   }
@@ -1408,6 +1417,209 @@ class AppState extends ChangeNotifier {
     await db.saveFollowUps(updated);
     await _reloadCrm();
   }
+  // ── NUEVO: integración con la sincronización familiar ───────────────────
+  // Propósito: marcar como pendientes las ventas/clientes que cambian aquí y
+  //            aplicar los cambios que llegan de otros celulares SIN cruzarse
+  //            con una venta local (todo pasa por la cola _serialized).
+  // Depende de: OperationalDatabase (sync_outbox, movimientos), el repositorio
+  //            y la cola de escrituras.
+  // No modifica: las firmas públicas ni el comportamiento con la
+  //              sincronización apagada (cloudSyncActive = false).
+
+  // CAMPO NUEVO: cloudSyncActive
+  // Motivo: solo se encolan cambios cuando la sincronización está activa.
+  // Compatibilidad: false por defecto; no altera ningún campo existente.
+  bool cloudSyncActive = false;
+
+  // CAMPO NUEVO: _localChanges
+  // Motivo: avisar al servicio de sincronización que hay algo por subir.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  final StreamController<void> _localChanges =
+      StreamController<void>.broadcast();
+
+  Stream<void> get localChanges => _localChanges.stream;
+
+  OperationalDatabase? get operationalDatabase => _operationalDatabase;
+
+  void _notifyLocalChange() {
+    if (cloudSyncActive) _localChanges.add(null);
+  }
+
+  Future<void> _markSaleChanged(String saleId, String countryCode) async {
+    final db = _operationalDatabase;
+    if (!cloudSyncActive || db == null) return;
+    await db.enqueueSync('sale', saleId, countryCode: countryCode);
+    _notifyLocalChange();
+  }
+
+  Future<void> _markCustomerChanged(String customerId) async {
+    final db = _operationalDatabase;
+    if (!cloudSyncActive || db == null) return;
+    await db.enqueueSync('customer', customerId);
+    _notifyLocalChange();
+  }
+
+  /// Guarda el editor de inventario aplicando solo lo que el usuario cambió.
+  /// Si otro celular vendió mientras el editor estaba abierto, esa venta se
+  /// respeta: se suma la diferencia en lugar de fijar la cantidad.
+  /// Sin cambios remotos el resultado es idéntico a saveInventoryQuantities.
+  Future<void> saveInventoryChanges({
+    required Map<String, int> original,
+    required Map<String, int> edited,
+  }) =>
+      _serialized(() async {
+        final current = {
+          for (final item in inventory) item.product.id: item.quantity,
+        };
+        final next = Map<String, int>.of(current);
+        for (final entry in edited.entries) {
+          if (entry.value < 0) {
+            throw ArgumentError.value(
+              entry.value,
+              entry.key,
+              'La cantidad no puede ser negativa.',
+            );
+          }
+          final before = original[entry.key] ?? 0;
+          if (entry.value == before) continue;
+          final updated = (current[entry.key] ?? 0) + (entry.value - before);
+          next[entry.key] = updated < 0 ? 0 : updated;
+        }
+        await _saveInventoryQuantities(next);
+      });
+
+  /// Ventas guardadas de un país (las del país abierto vienen de memoria).
+  Future<List<Sale>> salesOfCountry(String countryCode) async =>
+      selectedCountry?.code == countryCode
+          ? List.of(sales)
+          : await _repository.loadSales(countryCode);
+
+  Future<List<InventoryItem>> _inventoryOfCountry(String countryCode) async =>
+      selectedCountry?.code == countryCode
+          ? List.of(inventory)
+          : await _repository.loadInventory(countryCode);
+
+  /// Recalcula el inventario de los países indicados desde los movimientos y
+  /// actualiza los snapshots, sin registrar movimientos nuevos.
+  Future<void> _refreshInventoryFromMovements(Set<String> countryCodes) async {
+    for (final code in countryCodes) {
+      final stored = await _repository.loadInventory(code);
+      final List<InventoryItem> refreshed;
+      if (selectedCountry?.code == code) {
+        final productsById = {for (final product in products) product.id: product};
+        refreshed = stored
+            .map((item) => InventoryItem(
+                  product: productsById[item.product.id] ?? item.product,
+                  quantity: item.quantity,
+                ))
+            .toList();
+        inventory = refreshed;
+      } else {
+        refreshed = stored;
+      }
+      await _repository.saveSalesAndInventory(
+        code,
+        refreshed,
+        await salesOfCountry(code),
+        recordInventoryMovement: false,
+      );
+    }
+  }
+
+  /// Movimientos de inventario que llegaron de otro celular.
+  Future<void> applyRemoteMovements(List<Map<String, Object?>> rows) =>
+      _serialized(() async {
+        final db = _operationalDatabase;
+        if (db == null || rows.isEmpty) return;
+        final inserted = await db.insertRemoteMovements(rows);
+        if (inserted == 0) return;
+        await _refreshInventoryFromMovements({
+          for (final row in rows) row['country_code'] as String,
+        });
+        notifyListeners();
+      });
+
+  /// "El principal manda": reemplaza el inventario local por el de la nube.
+  Future<void> replaceInventoryFromCloud(List<Map<String, Object?>> rows) =>
+      _serialized(() async {
+        final db = _operationalDatabase;
+        if (db == null) return;
+        await db.replaceAllMovements(rows);
+        await _refreshInventoryFromMovements({
+          for (final country in countries) country.code,
+          for (final row in rows) row['country_code'] as String,
+        });
+        notifyListeners();
+      });
+
+  /// Ventas que llegaron de la nube (del mismo vendedor, otro celular).
+  /// [deletedIds] son ventas eliminadas en otro celular. Las ventas con
+  /// cambios locales aún sin subir no se pisan.
+  Future<void> applyRemoteSales(
+    String countryCode,
+    List<Sale> remote, {
+    Set<String> deletedIds = const {},
+  }) =>
+      _serialized(() async {
+        final db = _operationalDatabase;
+        if (db == null) return;
+        final pending = {
+          for (final row in await db.pendingSync())
+            if (row['entity'] == 'sale') row['entity_id'] as String,
+        };
+        final merged = mergeRemoteSales(
+          local: await salesOfCountry(countryCode),
+          remote: remote,
+          deletedIds: deletedIds,
+          pendingIds: pending,
+        );
+        await _repository.saveSalesAndInventory(
+          countryCode,
+          await _inventoryOfCountry(countryCode),
+          merged,
+          recordInventoryMovement: false,
+        );
+        if (selectedCountry?.code == countryCode) sales = merged;
+        notifyListeners();
+      });
+
+  /// Une ventas locales y remotas por id. La remota gana salvo que la local
+  /// tenga cambios pendientes de subir. Orden: más recientes primero.
+  @visibleForTesting
+  static List<Sale> mergeRemoteSales({
+    required List<Sale> local,
+    required List<Sale> remote,
+    Set<String> deletedIds = const {},
+    Set<String> pendingIds = const {},
+  }) {
+    final byId = {for (final sale in local) sale.id: sale};
+    for (final sale in remote) {
+      if (pendingIds.contains(sale.id)) continue;
+      byId[sale.id] = sale;
+    }
+    for (final id in deletedIds) {
+      if (!pendingIds.contains(id)) byId.remove(id);
+    }
+    return byId.values.toList()..sort((a, b) => b.soldAt.compareTo(a.soldAt));
+  }
+
+  /// Clientes que llegaron de la nube (del mismo vendedor, otro celular).
+  Future<void> applyRemoteCustomers(List<Customer> remote) =>
+      _crmBatch(() async {
+        final db = _operationalDatabase;
+        if (db == null || remote.isEmpty) return;
+        final pending = {
+          for (final row in await db.pendingSync())
+            if (row['entity'] == 'customer') row['entity_id'] as String,
+        };
+        for (final customer in remote) {
+          if (pending.contains(customer.id)) continue;
+          await db.saveCustomer(customer);
+        }
+        await _reloadCrm();
+        notifyListeners();
+      });
+
 }
 
 class _SaleBuildResult {
