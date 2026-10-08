@@ -984,7 +984,7 @@ class AppState extends ChangeNotifier {
         (birthdaysByCustomer[item.customerId] ??= []).add(item);
       }
     }
-    final knownIds = {for (final item in followUps) item.id};
+    final knownById = {for (final item in followUps) item.id: item};
     for (final customer in customers) {
       final birthday = customer.birthday;
       final customerBirthdays =
@@ -1023,13 +1023,20 @@ class AppState extends ChangeNotifier {
         }
       }
       keep ??= FollowUp(
-        id: _uuid.v4(),
+        // Id fijo por cliente y año: con la sincronización familiar, dos
+        // celulares generan EL MISMO seguimiento de cumpleaños, no dos.
+        id: 'birthday_${customer.id}_${due.year}',
         customerId: customer.id,
         type: FollowUpType.birthday,
         dueAt: due,
         createdAt: now,
       );
-      if (!knownIds.contains(keep.id)) changes.add(keep);
+      // Se guarda si no existe, o si existe pero ya no está pendiente
+      // (p. ej. se canceló al desactivar los recordatorios y se reactivaron).
+      final existing = knownById[keep.id];
+      if (existing == null || existing.status != FollowUpStatus.pending) {
+        changes.add(keep);
+      }
     }
     if (changes.isNotEmpty) await db.saveFollowUps(changes);
     await _reloadCrm();
@@ -1617,6 +1624,70 @@ class AppState extends ChangeNotifier {
           await db.saveCustomer(customer);
         }
         await _reloadCrm();
+        notifyListeners();
+      });
+
+  // ── NUEVO: sincronización familiar Fase 2 en AppState ──────────────────
+  // Propósito: aplicar seguimientos, notas y configuración que llegan de la
+  //            nube y recargar el CRM (y las notificaciones) una sola vez.
+  // Depende de: OperationalDatabase.applyRemote*, sync_outbox, _crmBatch.
+  // No modifica: los métodos existentes del CRM.
+
+  /// Devuelve los ids de clientes que faltan localmente (sus seguimientos
+  /// se omitieron y deben reintentarse cuando llegue el cliente).
+  Future<Set<String>> applyRemoteFollowUpData({
+    List<FollowUp> followUps = const [],
+    List<FollowUpNote> notes = const [],
+  }) =>
+      _crmBatch(() async {
+        final db = _operationalDatabase;
+        if (db == null || (followUps.isEmpty && notes.isEmpty)) return <String>{};
+        final pending = await db.pendingSync();
+        final missing = await db.applyRemoteFollowUpData(
+          followUps: followUps,
+          notes: notes,
+          skipFollowUpIds: {
+            for (final row in pending)
+              if (row['entity'] == 'follow_up') row['entity_id'] as String,
+          },
+          skipNoteIds: {
+            for (final row in pending)
+              if (row['entity'] == 'follow_up_note') row['entity_id'] as String,
+          },
+        );
+        await _reloadCrm();
+        notifyListeners();
+        return missing;
+      });
+
+  Future<void> applyRemoteSettings({int? reminderHour, int? monthlyPointsGoal}) =>
+      _crmBatch(() async {
+        final db = _operationalDatabase;
+        if (db == null) return;
+        final pending = await db.pendingSync();
+        if (pending.any((row) => row['entity'] == 'settings')) return;
+        await db.applyRemoteSettings(
+          reminderHour: reminderHour,
+          monthlyPointsGoal: monthlyPointsGoal,
+        );
+        await _reloadCrm();
+        notifyListeners();
+      });
+
+  Future<void> applyRemoteProductConfig(List<Map<String, Object?>> rows) =>
+      _crmBatch(() async {
+        final db = _operationalDatabase;
+        if (db == null || rows.isEmpty) return;
+        final pending = {
+          for (final row in await db.pendingSync())
+            if (row['entity'] == 'product_config') row['entity_id'] as String,
+        };
+        await db.applyRemoteProductConfig(rows.where((row) => !pending.contains(
+              OperationalDatabase.productConfigId(
+                row['country_code'] as String,
+                row['product_id'] as String,
+              ),
+            )));
         notifyListeners();
       });
 

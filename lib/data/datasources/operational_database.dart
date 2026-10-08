@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:developer' as developer;
@@ -133,6 +134,7 @@ class OperationalDatabase {
   Future<void> setReminderHour(int hour) async {
     if (hour < 0 || hour > 23) throw ArgumentError.value(hour, 'hour');
     await _database.insert('metadata', {'key': 'reminder_hour', 'value': '$hour'}, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _recordChange('settings', 'config');
   }
 
   Future<void> setMonthlyPointsGoal(int goal) async {
@@ -142,6 +144,7 @@ class OperationalDatabase {
       {'key': 'monthly_points_goal', 'value': '$goal'},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    await _recordChange('settings', 'config');
   }
 
   Future<int?> configuredDurationDays(String productId, String countryCode, ProductCategory category) async {
@@ -165,6 +168,7 @@ class OperationalDatabase {
       'enabled': enabled ? 1 : 0, 'duration_unit': 'days',
       'duration_value': days, 'updated_at': DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace,);
+    await _recordChange('product_config', productConfigId(countryCode, productId));
   }
 
   Future<void> _migrateFromHive(LocalStore hive) async {
@@ -418,6 +422,179 @@ class OperationalDatabase {
         'reverses_movement_id': row['reverses_movement_id'] as String?,
       };
 
+
+  // ── NUEVO: sincronización familiar Fase 2 (seguimientos y configuración) ─
+  // Propósito: marcar como pendientes los seguimientos, notas y configuración
+  //            que cambian en este celular, y aplicar los que llegan de la
+  //            nube SIN volver a marcarlos (evita un eco infinito).
+  // Depende de: sync_outbox, follow_ups, follow_up_notes, metadata y
+  //            product_follow_up_config.
+  // No modifica: lo que guardan los métodos existentes ni sus firmas.
+
+  // CAMPO NUEVO: recordSyncChanges
+  // Motivo: solo se encolan cambios con la sincronización activa.
+  // Compatibilidad: false por defecto; sin sincronización nada cambia.
+  bool recordSyncChanges = false;
+
+  // CAMPO NUEVO: _syncRecorded
+  // Motivo: avisar al servicio de sincronización que hay algo por subir.
+  // Compatibilidad: no reemplaza ni altera ningún campo existente.
+  final StreamController<void> _syncRecorded = StreamController<void>.broadcast();
+
+  Stream<void> get syncRecorded => _syncRecorded.stream;
+
+  Future<void> _recordChange(String entity, String id) async {
+    if (!recordSyncChanges) return;
+    await enqueueSync(entity, id);
+    _syncRecorded.add(null);
+  }
+
+  static String productConfigId(String countryCode, String productId) =>
+      '${countryCode}_$productId';
+
+  static Map<String, Object?> _followUpRow(FollowUp item) => {
+        'id': item.id, 'customer_id': item.customerId, 'sale_id': item.saleId,
+        'due_at': item.dueAt.toIso8601String(), 'status': item.status.name,
+        'payload': jsonEncode(item.toJson()),
+      };
+
+  static Map<String, Object?> _noteRow(FollowUpNote note) => {
+        'id': note.id,
+        'customer_id': note.customerId,
+        'follow_up_id': note.followUpId,
+        'sale_id': note.saleId,
+        'product_id': note.productId,
+        'created_at': note.createdAt.toIso8601String(),
+        'updated_at': note.updatedAt?.toIso8601String(),
+        'payload': jsonEncode(note.toJson()),
+      };
+
+  Future<Set<String>> customerIds() async => {
+        for (final row in await _database.query('customers', columns: ['id']))
+          row['id'] as String,
+      };
+
+  /// Seguimientos y notas que llegan de la nube. Los que apuntan a un
+  /// cliente inexistente se omiten (se devuelven sus ids de cliente).
+  Future<Set<String>> applyRemoteFollowUpData({
+    List<FollowUp> followUps = const [],
+    List<FollowUpNote> notes = const [],
+    Set<String> skipFollowUpIds = const {},
+    Set<String> skipNoteIds = const {},
+  }) async {
+    final known = await customerIds();
+    final missing = <String>{};
+    await _database.transaction((txn) async {
+      for (final item in followUps) {
+        if (skipFollowUpIds.contains(item.id)) continue;
+        if (!known.contains(item.customerId)) {
+          missing.add(item.customerId);
+          continue;
+        }
+        await txn.insert('follow_ups', _followUpRow(item), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final note in notes) {
+        if (skipNoteIds.contains(note.id)) continue;
+        if (!known.contains(note.customerId)) {
+          missing.add(note.customerId);
+          continue;
+        }
+        await txn.insert('follow_up_notes', _noteRow(note), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+    return missing;
+  }
+
+  Future<void> applyRemoteSettings({int? reminderHour, int? monthlyPointsGoal}) async {
+    if (reminderHour != null && reminderHour >= 0 && reminderHour <= 23) {
+      await _database.insert('metadata', {'key': 'reminder_hour', 'value': '$reminderHour'}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    if (monthlyPointsGoal != null && monthlyPointsGoal >= 1) {
+      await _database.insert('metadata', {'key': 'monthly_points_goal', 'value': '$monthlyPointsGoal'}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+  }
+
+  Future<List<Map<String, Object?>>> productConfigRows() =>
+      _database.query('product_follow_up_config');
+
+  Future<Map<String, Object?>?> productConfigRow(String countryCode, String productId) async {
+    final rows = await _database.query('product_follow_up_config',
+        where: 'product_id = ? AND country_code = ?', whereArgs: [productId, countryCode], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<void> applyRemoteProductConfig(Iterable<Map<String, Object?>> rows) async {
+    await _database.transaction((txn) async {
+      for (final row in rows) {
+        await txn.insert('product_follow_up_config', {
+          'product_id': row['product_id'] as String,
+          'country_code': row['country_code'] as String,
+          'enabled': (row['enabled'] as num).toInt(),
+          'duration_unit': row['duration_unit'] as String? ?? 'days',
+          'duration_value': (row['duration_value'] as num).toInt(),
+          'updated_at': row['updated_at'] as String? ?? DateTime.now().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  /// Importación con la sincronización activa: solo seguimientos, notas,
+  /// configuración por producto y simulaciones. Los clientes solo se agregan
+  /// si no existen; nada existente se pisa. Inventario y ventas se ignoran
+  /// para no mezclar el inventario compartido ni pisar ventas de la nube.
+  /// Devuelve los ids nuevos por tipo para subirlos a la nube.
+  Future<Map<String, List<String>>> importModulesForSync(Map<String, dynamic> data) async {
+    final schemaVersion = data['schemaVersion'];
+    if (schemaVersion != 1 && schemaVersion != 2) {
+      throw const FormatException('Version de respaldo no compatible.');
+    }
+    final inserted = <String, List<String>>{
+      'customer': [], 'follow_up': [], 'follow_up_note': [], 'product_config': [],
+    };
+    List<Map<String, Object?>> rowsOf(String key) => [
+          for (final raw in ((data[key] as List?) ?? const []).cast<Map>())
+            raw.map((k, v) => MapEntry(k.toString(), v)),
+        ];
+    await _database.transaction((txn) async {
+      Future<void> insertMissing(String key, String table, String entity, String Function(Map<String, Object?>) idOf, {Set<String>? requireCustomer}) async {
+        for (final row in rowsOf(key)) {
+          // Un seguimiento o nota de un cliente inexistente se omite: si no,
+          // la llave foránea abortaría toda la importación.
+          if (requireCustomer != null && !requireCustomer.contains(row['customer_id'])) continue;
+          final result = await txn.insert(table, row, conflictAlgorithm: ConflictAlgorithm.ignore);
+          if (result > 0) inserted[entity]!.add(idOf(row));
+        }
+      }
+      await insertMissing('clients', 'customers', 'customer', (row) => row['id'] as String);
+      final known = {
+        for (final row in await txn.query('customers', columns: ['id'])) row['id'] as String,
+      };
+      await insertMissing('followups', 'follow_ups', 'follow_up', (row) => row['id'] as String, requireCustomer: known);
+      await insertMissing('notes', 'follow_up_notes', 'follow_up_note', (row) => row['id'] as String, requireCustomer: known);
+      await insertMissing('config', 'product_follow_up_config', 'product_config',
+          (row) => productConfigId(row['country_code'] as String, row['product_id'] as String));
+      // Simulaciones: se unen por id con las actuales (no se reemplazan).
+      for (final row in rowsOf('snapshots').where((row) => row['module'] == 'simulations')) {
+        final country = row['country_code'] as String;
+        final current = await txn.query('snapshots', columns: ['payload'],
+            where: 'module = ? AND country_code = ?', whereArgs: ['simulations', country], limit: 1);
+        final byId = <String, dynamic>{
+          for (final item in (current.isEmpty ? const [] : jsonDecode(current.first['payload'] as String) as List))
+            (item as Map)['id'] as String: item,
+        };
+        for (final item in jsonDecode(row['payload'] as String) as List) {
+          byId.putIfAbsent((item as Map)['id'] as String, () => item);
+        }
+        await txn.insert('snapshots', {
+          'module': 'simulations', 'country_code': country,
+          'payload': jsonEncode(byId.values.toList()),
+          'updated_at': DateTime.now().toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+    return inserted;
+  }
+
   static Map<String, Object?> _movementMap(InventoryMovement item) => {
         'id': item.id, 'product_id': item.productId, 'country_code': item.countryCode,
         'type': item.type.name, 'quantity_delta': item.quantityDelta,
@@ -454,11 +631,14 @@ class OperationalDatabase {
       'due_at': item.dueAt.toIso8601String(), 'status': item.status.name,
       'payload': jsonEncode(item.toJson()),
     }, conflictAlgorithm: ConflictAlgorithm.replace,);
+    await _recordChange('follow_up', item.id);
   }
 
   Future<void> saveFollowUps(Iterable<FollowUp> items) async {
+    // Se materializa una vez: se recorre al guardar y al marcar pendientes.
+    final list = items.toList();
     await _database.transaction((txn) async {
-      for (final item in items) {
+      for (final item in list) {
         await txn.insert('follow_ups', {
           'id': item.id, 'customer_id': item.customerId, 'sale_id': item.saleId,
           'due_at': item.dueAt.toIso8601String(), 'status': item.status.name,
@@ -466,6 +646,9 @@ class OperationalDatabase {
         }, conflictAlgorithm: ConflictAlgorithm.replace,);
       }
     });
+    for (final item in list) {
+      await _recordChange('follow_up', item.id);
+    }
   }
 
   Future<List<FollowUpNote>> loadFollowUpNotes({String? customerId}) async {
@@ -499,6 +682,7 @@ class OperationalDatabase {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    await _recordChange('follow_up_note', note.id);
   }
 
   Future<void> _migrateLegacyFollowUpNotes() async {
